@@ -1,8 +1,10 @@
 {
-  "name": "Core Theory Studio Manager",
-  "short_name": "Core Theory",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#f6f1e8",
-  "theme_color": "#22221f"
+  "name":"Core Theory Studio",
+  "short_name":"Core Theory",
+  "start_url":"./",
+  "scope":"./",
+  "display":"standalone",
+  "background_color":"#f6f1e8",
+  "theme_color":"#22221f",
+  "description":"Core Theory Pilates and Megacore booking and studio management app"
 }
