@@ -1,6 +1,6 @@
 {
-  "name": "StudioFlow Pilates Studio Manager",
-  "short_name": "StudioFlow",
+  "name": "Core Theory Studio Manager",
+  "short_name": "Core Theory",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f6f1e8",
