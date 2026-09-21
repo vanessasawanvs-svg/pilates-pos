@@ -1,0 +1,8 @@
+{
+  "name": "StudioFlow Pilates Studio Manager",
+  "short_name": "StudioFlow",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f1e8",
+  "theme_color": "#22221f"
+}
