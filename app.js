@@ -892,6 +892,47 @@ async function frontDeskManualBook(){
     :(data?.status==='waitlist'?'Client added to waitlist.':'Client booked using their valid package.'))
 }
 
+
+let deferredInstallPrompt=null;
+function isStandalonePWA(){return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true}
+function isiOSDevice(){return /iphone|ipad|ipod/i.test(navigator.userAgent)}
+function showPWAInstallHelp(){
+  if(isStandalonePWA())return alert('Core Theory is already installed on this device.');
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt.userChoice.finally(()=>{deferredInstallPrompt=null;updatePWAInstallButton()});
+    return;
+  }
+  if(isiOSDevice()){
+    modal('Install Core Theory',`<div class="card"><h3>Add Core Theory to your Home Screen</h3><p>1. Open Core Theory in <b>Safari</b>.</p><p>2. Tap the <b>Share</b> button.</p><p>3. Tap <b>Add to Home Screen</b>.</p><p>4. Tap <b>Add</b>.</p><p class="muted">It will open like an app in its own window.</p></div>`);
+  }else{
+    modal('Install Core Theory',`<div class="card"><h3>Install Core Theory</h3><p>Use your browser menu and choose <b>Install app</b> or <b>Add to Home Screen</b>.</p></div>`);
+  }
+}
+function updatePWAInstallButton(){
+  let b=document.getElementById('coreTheoryInstallButton');
+  if(isStandalonePWA()){if(b)b.remove();return}
+  if(!window.matchMedia('(max-width: 900px)').matches)return;
+  if(!b){
+    b=document.createElement('button');
+    b.id='coreTheoryInstallButton';
+    b.type='button';
+    b.className='core-pwa-install';
+    b.textContent='Install Core Theory';
+    b.onclick=showPWAInstallHelp;
+    document.body.appendChild(b);
+  }
+}
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;updatePWAInstallButton()});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updatePWAInstallButton()});
+window.addEventListener('load',()=>setTimeout(updatePWAInstallButton,700));
+function applyPWAStyles(){
+  if(document.getElementById('coreTheoryPWAStyle'))return;
+  const s=document.createElement('style');s.id='coreTheoryPWAStyle';
+  s.textContent=`.core-pwa-install{position:fixed;right:14px;bottom:14px;z-index:9999;border:0;border-radius:999px;padding:11px 15px;background:#722F37;color:#fff!important;-webkit-text-fill-color:#fff!important;font:600 14px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18);cursor:pointer}@media(min-width:901px){.core-pwa-install{display:none}}@media(display-mode:standalone){.core-pwa-install{display:none!important}}body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}`;
+  document.head.appendChild(s);
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
@@ -926,4 +967,5 @@ applyMobileButtonColorFix();
 applyClickableAlertStyle();
 applyPackageClarityStyle();
 applyPackageFlowStyle();
+applyPWAStyles();
 init();
