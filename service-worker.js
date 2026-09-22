@@ -1,4 +1,4 @@
-const CACHE='core-theory-v9-9-pwa';
+const CACHE='core-theory-v9-10-mobile-side-nav';
 const PRECACHE=['/','/index.html','/styles.css','/app.js','/manifest.json','/offline.html','/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(PRECACHE)))});
 self.addEventListener('activate',e=>e.waitUntil((async()=>{const ks=await caches.keys();await Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim()})()));

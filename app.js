@@ -933,6 +933,105 @@ function applyPWAStyles(){
   document.head.appendChild(s);
 }
 
+
+// ================= CORE THEORY V9.10 MOBILE SIDE NAV =================
+function applyMobileSideNav(){
+  if(document.getElementById('coreTheoryMobileSideNav'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryMobileSideNav';
+  s.textContent=`
+    @media(max-width:760px){
+      /* Keep navigation as a visible vertical sidebar instead of a horizontal top strip */
+      .sidebar{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:190px !important;
+        height:100dvh !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        z-index:1000 !important;
+        padding-top:env(safe-area-inset-top) !important;
+        padding-bottom:env(safe-area-inset-bottom) !important;
+      }
+
+      .sidebar .nav,
+      .nav{
+        display:flex !important;
+        flex-direction:column !important;
+        flex-wrap:nowrap !important;
+        overflow:visible !important;
+        width:100% !important;
+        gap:8px !important;
+      }
+
+      .sidebar .nav button,
+      .sidebar .nav .nav-item{
+        width:100% !important;
+        min-width:0 !important;
+        white-space:normal !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .main,
+      main,
+      .content,
+      .page-content{
+        margin-left:190px !important;
+        width:calc(100% - 190px) !important;
+        max-width:calc(100% - 190px) !important;
+      }
+
+      /* Prevent top horizontal nav behavior on phone */
+      .mobile-nav,
+      .top-nav,
+      .nav-scroll,
+      .nav-wrapper{
+        overflow-x:visible !important;
+        white-space:normal !important;
+      }
+
+      /* Make content usable on narrow phones beside the sidebar */
+      .grid,
+      .grid.two,
+      .grid.three,
+      .grid.kpis{
+        grid-template-columns:1fr !important;
+      }
+
+      table{
+        display:block;
+        overflow-x:auto;
+        max-width:100%;
+      }
+
+      .card{
+        max-width:100%;
+        box-sizing:border-box;
+      }
+    }
+
+    @media(max-width:430px){
+      .sidebar{
+        width:165px !important;
+      }
+      .main,
+      main,
+      .content,
+      .page-content{
+        margin-left:165px !important;
+        width:calc(100% - 165px) !important;
+        max-width:calc(100% - 165px) !important;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
@@ -968,4 +1067,5 @@ applyClickableAlertStyle();
 applyPackageClarityStyle();
 applyPackageFlowStyle();
 applyPWAStyles();
+applyMobileSideNav();
 init();
