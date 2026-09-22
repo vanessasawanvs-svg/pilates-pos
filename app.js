@@ -1051,7 +1051,10 @@ function layout(content,title,subtitle=''){
       <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
       <aside class="sidebar">
         <div class="mobile-drawer-head">
-          <img class="drawer-logo" src="/nav-logo.png" alt="Core Theory">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
           <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
         </div>
         <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
@@ -1189,13 +1192,35 @@ function applyMobileDrawerNav(){
         margin-bottom:8px;
       }
 
-      .drawer-logo{
-        display:block;
-        width:150px;
-        max-width:72%;
-        height:auto;
-        background:#f6f1e8;
-        border-radius:10px;
+      .drawer-wordmark{
+        display:flex;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:center;
+        line-height:1;
+        padding:2px 0 4px;
+      }
+
+      .drawer-wordmark-core{
+        color:#722F37 !important;
+        -webkit-text-fill-color:#722F37 !important;
+        font-family:Georgia,"Times New Roman",serif;
+        font-size:31px;
+        font-weight:700;
+        letter-spacing:-1.8px;
+        line-height:.86;
+      }
+
+      .drawer-wordmark-theory{
+        margin-top:6px;
+        color:#8a8a86 !important;
+        -webkit-text-fill-color:#8a8a86 !important;
+        font-family:"Helvetica Neue",Arial,sans-serif;
+        font-size:11px;
+        font-weight:600;
+        letter-spacing:7.2px;
+        line-height:1;
+        padding-left:2px;
       }
 
       .drawer-close{
