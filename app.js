@@ -723,6 +723,175 @@ function applyPackageFlowStyle(){
   document.head.appendChild(s);
 }
 
+
+// ================= CORE THEORY V9.7 CLIENT BOOKING CUTOFF =================
+function clientClassStart(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+}
+function clientMinutesUntilClass(c){
+  return Math.floor((clientClassStart(c).getTime()-Date.now())/60000);
+}
+function clientBookingClosed(c){
+  const ms=clientClassStart(c).getTime()-Date.now();
+  return ms < 60*60*1000; // exactly 60 minutes is still bookable; 59:59 or less is closed
+}
+function clientClassIsPast(c){
+  return clientClassStart(c).getTime()<=Date.now();
+}
+function book(){
+  const days=[];
+  for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(dateISO(d))}
+  const cs=db.classes
+    .filter(c=>days.includes(c.class_date)&&!c.cancelled&&!clientClassIsPast(c))
+    .filter(c=>(c.studio_type||'Pilates')===studioTab)
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  layout(`<div class="schedule-tabs">
+    <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+    <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+  </div>
+  <div class="client-class-grid">${cs.map(c=>{
+    const n=bookingCount(c.id),full=n>=Number(c.capacity||0),closed=clientBookingClosed(c);
+    return `<div class="card client-class">
+      <div class="date">${new Date(c.class_date+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div>
+      <h3>${esc(c.class_type)}</h3>
+      <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+      <p>${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'')}</p>
+      <p class="muted">${Math.max(0,Number(c.capacity||0)-n)} spots remaining</p>
+      ${closed
+        ? `<button class="btn" disabled>Booking closed</button><small class="muted">Bookings close 1 hour before class.</small>`
+        : `<button class="btn primary" ${full?'disabled':''} onclick="clientBook('${c.id}')">${full?'Full':'Book'}</button>`
+      }
+    </div>`;
+  }).join('')||'<div class="empty">No upcoming classes.</div>'}</div>`,
+  `Book a Class`,
+  `Only upcoming classes are shown. Online booking closes 1 hour before class.`)
+}
+function clientBook(classId){
+  const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+  if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+  const rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===classScope));
+  const currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+  const option=(m)=>`<option value="buy:${m.id}">${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+
+  modal('How would you like to book?',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+  </div>
+  <label>Booking option</label>
+  <select id="bookPackage">
+    ${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE</option>`).join('')}
+    ${currentOk?`<option value="current">Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))} · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}</option>`:''}
+    ${exact.length?`<optgroup label="${esc(classScope)} packages">${exact.map(option).join('')}</optgroup>`:''}
+    ${mix.length?`<optgroup label="Mix packages">${mix.map(option).join('')}</optgroup>`:''}
+  </select>
+  <p class="muted">Only packages valid for this ${esc(classScope)} class are shown. Online booking closes 1 hour before the class starts.</p>
+  <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+  <input id="bookCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)
+}
+
+
+// ================= CORE THEORY V9.8 CAPACITY + OWNER OVERRIDE =================
+function clientBookingCapacityState(c){
+  const booked=bookingCount(c.id);
+  const capacity=Number(c.capacity||0);
+  return {booked,capacity,spaces:Math.max(0,capacity-booked),full:booked>=capacity};
+}
+function book(){
+  const days=[];
+  for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(dateISO(d))}
+  const cs=db.classes
+    .filter(c=>days.includes(c.class_date)&&!c.cancelled&&!clientClassIsPast(c))
+    .filter(c=>(c.studio_type||'Pilates')===studioTab)
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  layout(`<div class="schedule-tabs">
+    <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+    <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+  </div>
+  <div class="client-class-grid">${cs.map(c=>{
+    const cap=clientBookingCapacityState(c),closed=clientBookingClosed(c);
+    return `<div class="card client-class">
+      <div class="date">${new Date(c.class_date+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div>
+      <h3>${esc(c.class_type)}</h3>
+      <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+      <p>${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'')}</p>
+      <p class="muted">${cap.full?'Class is full':`${cap.spaces} spot${cap.spaces===1?'':'s'} remaining`}</p>
+      ${closed
+        ? `<button class="btn" disabled>Booking closed</button><small class="muted">Bookings close 1 hour before class.</small>`
+        : cap.full
+          ? `<button class="btn" disabled>Full</button>`
+          : `<button class="btn primary" onclick="clientBook('${c.id}')">Book</button>`
+      }
+    </div>`;
+  }).join('')||'<div class="empty">No upcoming classes.</div>'}</div>`,
+  `Book a Class`,
+  `Clients can only book if a spot is available. Online booking closes 1 hour before class.`)
+}
+function clientBook(classId){
+  const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+  const cap=clientBookingCapacityState(cl);
+  if(cap.full)return alert('This class is full.');
+  if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+  const rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===classScope));
+  const currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+  const option=(m)=>`<option value="buy:${m.id}">${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+
+  modal('How would you like to book?',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+    <p class="muted">${cap.spaces} spot${cap.spaces===1?'':'s'} remaining</p>
+  </div>
+  <label>Booking option</label>
+  <select id="bookPackage">
+    ${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE</option>`).join('')}
+    ${currentOk?`<option value="current">Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))} · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}</option>`:''}
+    ${exact.length?`<optgroup label="${esc(classScope)} packages">${exact.map(option).join('')}</optgroup>`:''}
+    ${mix.length?`<optgroup label="Mix packages">${mix.map(option).join('')}</optgroup>`:''}
+  </select>
+  <p class="muted">Only packages valid for this ${esc(classScope)} class are shown. Online booking closes 1 hour before class.</p>
+  <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+  <input id="bookCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)
+}
+async function staffBook(classId){
+  const clientId=$("#bkclient").value;if(!clientId)return;
+  const {data,error}=await sb.rpc('staff_book_client',{p_class_id:String(classId),p_client_id:String(clientId),p_owner_force:isOwner()});
+  if(error)return alert(error.message);
+  $("#modal").remove();await loadAll();
+  alert(data?.payment_status==='pending'
+    ?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.')
+    :(data?.status==='waitlist'?'Client added to waitlist.':'Client booked.'));
+  openClass(classId)
+}
+async function frontDeskManualBook(){
+  const classId=$("#fdBookClass")?.value;
+  if(!classId||!fdBookingClient)return alert('Choose a class and client.');
+  const {data,error}=await sb.rpc('staff_book_client',{p_class_id:classId,p_client_id:fdBookingClient.id,p_owner_force:false});
+  if(error)return alert(error.message);
+  fdBookingClient=null;await loadAll();
+  alert(data?.payment_status==='pending'
+    ?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.')
+    :(data?.status==='waitlist'?'Client added to waitlist.':'Client booked using their valid package.'))
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
