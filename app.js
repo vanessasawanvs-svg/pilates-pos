@@ -1032,6 +1032,255 @@ function applyMobileSideNav(){
   document.head.appendChild(s);
 }
 
+
+// ================= CORE THEORY V9.11 MOBILE DRAWER NAV =================
+function openMobileMenu(){
+  document.body.classList.add('mobile-menu-open');
+}
+function closeMobileMenu(){
+  document.body.classList.remove('mobile-menu-open');
+}
+function toggleMobileMenu(){
+  document.body.classList.toggle('mobile-menu-open');
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <img class="drawer-logo" src="/nav-logo.png" alt="Core Theory">
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+        <div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div>
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+          <button class="btn" onclick="loadAll()">Refresh</button>
+        </div>
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
+function applyMobileDrawerNav(){
+  if(document.getElementById('coreTheoryMobileDrawerNav'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryMobileDrawerNav';
+  s.textContent=`
+    .mobile-menu-button,.mobile-menu-backdrop,.drawer-close,.mobile-drawer-head,.mobile-role-label{display:none}
+
+    @media(max-width:760px){
+      body.mobile-menu-open{overflow:hidden}
+
+      .app{display:block !important}
+
+      .main,main,.content,.page-content{
+        margin-left:0 !important;
+        width:100% !important;
+        max-width:100% !important;
+        padding-left:14px !important;
+        padding-right:14px !important;
+        box-sizing:border-box !important;
+      }
+
+      .sidebar{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:min(82vw,300px) !important;
+        height:100dvh !important;
+        z-index:1200 !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        transform:translateX(-102%) !important;
+        transition:transform .22s ease !important;
+        padding:calc(14px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom)) !important;
+        box-sizing:border-box !important;
+        box-shadow:8px 0 28px rgba(0,0,0,.22) !important;
+      }
+
+      body.mobile-menu-open .sidebar{
+        transform:translateX(0) !important;
+      }
+
+      .mobile-menu-backdrop{
+        display:block !important;
+        position:fixed;
+        inset:0;
+        background:rgba(0,0,0,.36);
+        z-index:1190;
+        opacity:0;
+        visibility:hidden;
+        transition:opacity .22s ease,visibility .22s ease;
+      }
+
+      body.mobile-menu-open .mobile-menu-backdrop{
+        opacity:1;
+        visibility:visible;
+      }
+
+      .mobile-menu-button{
+        display:inline-grid !important;
+        place-items:center;
+        flex:0 0 auto;
+        width:42px;
+        height:42px;
+        border:0;
+        border-radius:12px;
+        background:#722F37;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+        font-size:23px !important;
+        line-height:1;
+        padding:0;
+      }
+
+      .mobile-title-row{
+        display:flex;
+        align-items:flex-start;
+        gap:10px;
+        min-width:0;
+      }
+
+      .topbar{
+        align-items:flex-start !important;
+        gap:10px !important;
+      }
+
+      .topbar h1{
+        font-size:24px !important;
+        line-height:1.15 !important;
+        margin-top:2px !important;
+      }
+
+      .mobile-drawer-head{
+        display:flex !important;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom:8px;
+      }
+
+      .drawer-logo{
+        display:block;
+        width:150px;
+        max-width:72%;
+        height:auto;
+        background:#f6f1e8;
+        border-radius:10px;
+      }
+
+      .drawer-close{
+        display:grid !important;
+        place-items:center;
+        width:38px;
+        height:38px;
+        border:0;
+        background:rgba(255,255,255,.08);
+        border-radius:10px;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+        font-size:28px !important;
+        line-height:1;
+        padding:0;
+      }
+
+      .desktop-brand{display:none !important}
+
+      .mobile-role-label{
+        display:block !important;
+        color:rgba(255,255,255,.68);
+        font-size:12px;
+        text-transform:uppercase;
+        letter-spacing:.08em;
+        padding:0 8px 10px;
+      }
+
+      .sidebar .nav,.nav{
+        display:flex !important;
+        flex-direction:column !important;
+        gap:5px !important;
+        width:100% !important;
+        overflow:visible !important;
+      }
+
+      .sidebar .nav button,.sidebar .nav .nav-item{
+        width:100% !important;
+        min-width:0 !important;
+        padding:12px 13px !important;
+        border-radius:10px !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        white-space:normal !important;
+        font-size:15px !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .sidebar .nav button.active{
+        background:#722F37 !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .role-chip{
+        margin-top:16px !important;
+      }
+
+      .logout{
+        width:100% !important;
+        margin-top:8px !important;
+        color:#333 !important;
+        -webkit-text-fill-color:#333 !important;
+      }
+
+      .grid,.grid.two,.grid.three,.grid.kpis{
+        grid-template-columns:1fr !important;
+      }
+
+      table{
+        display:block;
+        overflow-x:auto;
+        max-width:100%;
+      }
+
+      .card{
+        max-width:100%;
+        box-sizing:border-box;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
@@ -1067,5 +1316,5 @@ applyClickableAlertStyle();
 applyPackageClarityStyle();
 applyPackageFlowStyle();
 applyPWAStyles();
-applyMobileSideNav();
+applyMobileDrawerNav();
 init();
