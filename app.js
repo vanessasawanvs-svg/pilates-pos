@@ -2729,3 +2729,107 @@ function classesTaughtCount(t){
   return own.filter(classWasTaught).length;
 }
 
+
+// ================= CORE THEORY — SHOW SUBSTITUTE NAME ON SCHEDULE =================
+function ctActiveSubstitution(c){
+  return (db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(c.id) && s.active
+  )||null;
+}
+
+function ctDisplayedInstructor(c){
+  const sub=ctActiveSubstitution(c);
+  if(sub){
+    if(sub.substitute_name)return sub.substitute_name;
+    if(sub.substitute_instructor){
+      const t=(db.team||[]).find(x=>String(x.auth_user_id||'')===String(sub.substitute_instructor));
+      if(t?.name)return t.name;
+    }
+    if(sub.substitute_team_id){
+      const t=(db.team||[]).find(x=>String(x.id)===String(sub.substitute_team_id));
+      if(t?.name)return t.name;
+    }
+  }
+  return c.instructor||'No instructor';
+}
+
+function ctHasSubstitute(c){
+  return Boolean(ctActiveSubstitution(c));
+}
+
+// Override the class card used throughout the weekly schedule and instructor views.
+function classCard(c){
+  const n=bookingCount(c.id);
+  const instructorName=ctDisplayedInstructor(c);
+  const sub=ctHasSubstitute(c);
+
+  return `<div class="class-card" style="--level:${levelColor(c.level)}" onclick="openClass('${c.id}')">
+    <b>${esc(c.class_type||'Class')}</b>
+    <span>
+      ${esc(c.level||'Open Level')} ·
+      ${sub?`<strong>${esc(instructorName)}</strong> <small class="ct-sub-inline">Substitute</small>`:esc(instructorName)}
+    </span>
+    <small>${formatTime((c.class_time||'00:00').slice(0,5))} · ${n}/${c.capacity||0} booked</small>
+  </div>`;
+}
+
+// Patch the class detail popup after the existing openClass() renders it.
+// This keeps all existing booking/check-in controls untouched.
+const ctOriginalOpenClass = openClass;
+openClass = function(id){
+  ctOriginalOpenClass(id);
+
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c||!ctHasSubstitute(c))return;
+
+  const modalEl=document.querySelector('#modal .modal-card, #modal .modal, #modal');
+  if(!modalEl)return;
+
+  const displayed=ctDisplayedInstructor(c);
+  const original=c.instructor||'Unassigned';
+
+  const infoRows=[...modalEl.querySelectorAll('p')];
+  const firstInfo=infoRows.find(p=>p.textContent?.includes(c.studio_type||'Pilates'));
+  if(firstInfo){
+    firstInfo.innerHTML=
+      `<span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> `+
+      `${esc(c.studio_type||'Pilates')} · <b>${esc(displayed)}</b> `+
+      `<span class="ct-sub-inline">Substitute</span>`+
+      `<small class="ct-original-note">Original: ${esc(original)}</small>`;
+  }
+};
+
+// Keep client-facing class cards consistent too.
+function ctApplyDisplayedInstructorToClientCards(){
+  document.querySelectorAll('.client-class').forEach(card=>{
+    // no-op helper reserved for future DOM refreshes
+  });
+}
+
+(function ctSubstituteDisplayStyles(){
+  if(document.getElementById('ctSubstituteDisplayStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctSubstituteDisplayStyles';
+  s.textContent=`
+    .ct-sub-inline{
+      display:inline-block;
+      margin-left:5px;
+      padding:2px 6px;
+      border-radius:999px;
+      background:rgba(114,47,55,.10);
+      color:#722F37;
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.02em;
+      vertical-align:middle;
+    }
+    .ct-original-note{
+      display:block;
+      margin-top:4px;
+      color:#6B6B6B;
+      font-size:11px;
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
