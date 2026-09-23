@@ -4571,3 +4571,342 @@ function removePastedScheduleRow(i){
 }
 
 
+
+// ================= CORE THEORY — PASTE SCHEDULE DISPLAY FIX =================
+
+let ctPasteStartWeekOffset = 1;
+
+// Keep the normal Add Class modal simple so there is only ONE paste tool.
+function classModal(){
+  modal('Add class',classForm());
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="22" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | 5
+9 AM | Pilates | Beginner | By the Book | 5
+10 AM | Pilates | Open Level | Cheeky Business | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | 5
+9 AM | Pilates | Open Level | Cheeky Business | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Format: <b>Time | Studio | Level | Class Name | Capacity</b><br>
+          No instructor name is needed.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  ctPasteStartWeekOffset=weekOffset;
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(parsed.errors.length){
+    return alert('Nothing was created. Fix these lines first:\n\n'+parsed.errors.join('\n'));
+  }
+
+  if(!parsed.rows.length){
+    return alert('No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const total=parsed.rows.length*repeatWeeks;
+
+  modal('Preview Schedule',`
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatWeeks===1
+        ? 'This schedule will be created once.'
+        : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`
+      }<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Level</th>
+            <th>Class</th>
+            <th>Capacity</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const repeatWeeks=Number(ctPasteScheduleRows[0]?.repeat_weeks||1);
+  const scheduleGroup=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  ctPasteScheduleRows.forEach(r=>{
+    const base=new Date(`${r.class_date}T12:00:00`);
+
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+(w*7));
+
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.time,
+        class_type:r.class_type,
+        instructor:'',
+        instructor_user_id:null,
+        capacity:r.capacity,
+        studio_type:r.studio,
+        level:r.level,
+        recurring_group:scheduleGroup
+      });
+    }
+  });
+
+  // Block accidental duplicate timetable inserts.
+  const duplicate=payload.find(r=>(db.classes||[]).some(c=>
+    !c.cancelled &&
+    c.class_date===r.class_date &&
+    String(c.class_time||'').slice(0,5)===String(r.class_time||'').slice(0,5) &&
+    String(c.studio_type||'Pilates')===String(r.studio_type||'Pilates')
+  ));
+
+  if(duplicate){
+    return alert(
+      `There is already a ${duplicate.studio_type} class on ${duplicate.class_date} at `+
+      `${formatTime(String(duplicate.class_time).slice(0,5))}.\n\n`+
+      `Nothing was added so the schedule is not duplicated.`
+    );
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  // Use existing Class Hours rules for instructor assignment.
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+
+  await loadAll();
+
+  // IMPORTANT: automatically open the week where the pasted timetable starts.
+  scheduleWeekOffset=ctPasteStartWeekOffset;
+  studioTab='Pilates';
+  page='schedule';
+  schedule();
+
+  alert(
+    repeatWeeks===1
+      ? `${payload.length} classes created. You are now viewing the week they were added to.`
+      : `${payload.length} classes created across ${repeatWeeks} weeks. You are now viewing the first week.`
+  );
+}
+
+
+
+// ================= CORE THEORY — CLEAR WHOLE FUTURE SCHEDULE =================
+
+function clearScheduleModal(){
+  const future=(db.classes||[])
+    .filter(c=>!c.cancelled && String(c.class_date)>=today())
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal('Clear Schedule',`
+    <div class="warning" style="margin-bottom:14px">
+      <b>This will remove every upcoming class from the schedule.</b>
+      <p style="margin:8px 0 0">
+        Past classes are kept for attendance, history and payroll.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="cart-row">
+        <span>Upcoming classes to remove</span>
+        <b>${future.length}</b>
+      </div>
+    </div>
+
+    <div style="display:grid;gap:10px;margin-top:14px">
+      <button class="btn danger" onclick="clearWholeFutureSchedule()">
+        Clear Entire Future Schedule
+      </button>
+      <button class="btn" onclick="$('#modal').remove()">Keep Schedule</button>
+    </div>
+  `);
+}
+
+async function clearWholeFutureSchedule(){
+  if(!isOwner())return;
+
+  const future=(db.classes||[])
+    .filter(c=>!c.cancelled && String(c.class_date)>=today())
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(!future.length){
+    $("#modal")?.remove();
+    return alert('There are no upcoming classes to clear.');
+  }
+
+  const firstConfirm=confirm(
+    `Clear ALL ${future.length} upcoming classes from the schedule?\n\n`+
+    `This includes Pilates and Megacore classes from today onward.`
+  );
+  if(!firstConfirm)return;
+
+  const typed=prompt('Type CLEAR to confirm deleting the whole future schedule:');
+  if(String(typed||'').trim().toUpperCase()!=='CLEAR'){
+    return alert('Schedule was not cleared.');
+  }
+
+  const btn=document.querySelector('#modal .btn.danger');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Clearing schedule…';
+  }
+
+  let removed=0;
+
+  for(const c of future){
+    const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(c.id)});
+    if(error){
+      await loadAll();
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='Clear Entire Future Schedule';
+      }
+
+      return alert(
+        `${removed} classes were removed before Core Theory stopped because of an error:\n${error.message}`
+      );
+    }
+    removed++;
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  scheduleWeekOffset=0;
+  page='schedule';
+  schedule();
+
+  alert(`${removed} upcoming classes were removed from the schedule.`);
+}
+
+
+// Latest Schedule toolbar — includes Paste Schedule + Clear Schedule.
+function schedule(){
+  const mon=mondayOfWeek(scheduleWeekOffset),days=[];
+
+  for(let i=0;i<6;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';schedule()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';schedule()">MEGACORE</button>
+    </div>
+
+    <div class="schedule-tools">
+      <div class="toolbar">
+        ${isOwner()?`
+          <button class="btn primary" onclick="classModal()">+ Add class</button>
+          <button class="btn" onclick="pasteScheduleModal()">Paste Schedule</button>
+          <button class="btn danger" onclick="clearScheduleModal()">Clear Schedule</button>
+        `:''}
+
+        <button class="btn" onclick="scheduleWeekOffset--;schedule()">← Previous</button>
+        <button class="btn" onclick="scheduleWeekOffset=0;schedule()">This week</button>
+        <button class="btn" onclick="scheduleWeekOffset++;schedule()">Next →</button>
+      </div>
+    </div>
+
+    ${scheduleTable(days,studioTab)}
+  `,
+  'Schedule',
+  `${studioTab} weekly timetable — same times stay on the same row`);
+}
+
