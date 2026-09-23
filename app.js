@@ -2286,3 +2286,249 @@ function team(){
   document.head.appendChild(s);
 })();
 
+
+// ================= CORE THEORY — SMART SUBSTITUTE PICKER =================
+function ctClassDow(dateStr){
+  return new Date(`${dateStr}T12:00:00`).getDay();
+}
+
+function ctInstructorMatchesSavedSlot(t,c){
+  if(!t?.id||!c)return false;
+  const day=ctClassDow(c.class_date);
+  const time=String(c.class_time||'').slice(0,5);
+  const studio=c.studio_type||'Pilates';
+
+  return (db.instructor_class_slots||[]).some(s=>
+    String(s.team_id)===String(t.id) &&
+    Number(s.weekday)===day &&
+    String(s.class_time||'').slice(0,5)===time &&
+    ((s.studio_scope||'All')==='All' || s.studio_scope===studio)
+  );
+}
+
+function ctInstructorTimeConflict(t,c){
+  if(!t?.auth_user_id||!c)return null;
+
+  return (db.classes||[]).find(other=>
+    String(other.id)!==String(c.id) &&
+    !other.cancelled &&
+    other.class_date===c.class_date &&
+    String(other.class_time||'').slice(0,5)===String(c.class_time||'').slice(0,5) &&
+    String(instructorForClass(other)||'')===String(t.auth_user_id)
+  )||null;
+}
+
+function ctSubstituteCandidateHtml(t,c,currentSub){
+  const slotMatch=ctInstructorMatchesSavedSlot(t,c);
+  const conflict=ctInstructorTimeConflict(t,c);
+  const selected=String(currentSub||'')===String(t.auth_user_id||'');
+
+  let badge='';
+  if(conflict){
+    badge=`<span class="ct-sub-badge conflict">Already teaching ${esc(conflict.class_type||'another class')}</span>`;
+  }else if(slotMatch){
+    badge='<span class="ct-sub-badge good">Available · saved class hour</span>';
+  }else{
+    badge='<span class="ct-sub-badge neutral">Manual option</span>';
+  }
+
+  return `
+    <label class="ct-sub-option ${conflict?'is-conflict':''}">
+      <input
+        type="radio"
+        name="ctSubInstructor"
+        value="${esc(t.auth_user_id||'')}"
+        ${selected?'checked':''}
+        ${conflict&&!selected?'disabled':''}
+      >
+      <span class="ct-sub-copy">
+        <b>${esc(t.name)}</b>
+        ${badge}
+      </span>
+    </label>`;
+}
+
+function substituteClassModal(classId){
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return;
+
+  const current=(db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(classId) && s.active
+  );
+  const currentSub=current?.substitute_instructor||null;
+
+  const original=db.team.find(t=>String(t.auth_user_id||'')===String(c.instructor_user_id||''));
+  const instructors=(db.team||[])
+    .filter(t=>t.role==='Instructor'&&t.auth_user_id&&!t.archived_at)
+    .filter(t=>String(t.auth_user_id)!==String(c.instructor_user_id||''));
+
+  const ranked=instructors.map(t=>({
+    t,
+    slot:ctInstructorMatchesSavedSlot(t,c),
+    conflict:ctInstructorTimeConflict(t,c)
+  })).sort((a,b)=>{
+    if(Boolean(a.conflict)!==Boolean(b.conflict))return a.conflict?1:-1;
+    if(a.slot!==b.slot)return a.slot?-1:1;
+    return String(a.t.name||'').localeCompare(String(b.t.name||''));
+  });
+
+  const recommended=ranked.filter(x=>x.slot&&!x.conflict);
+  const other=ranked.filter(x=>!x.slot&&!x.conflict);
+  const busy=ranked.filter(x=>x.conflict);
+
+  modal('Assign substitute',`
+    <div class="ct-sub-class">
+      <b>${esc(c.class_type||'Class')}</b>
+      <span>${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+      · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+      · ${esc(c.studio_type||'Pilates')}</span>
+    </div>
+
+    <div class="ct-sub-original">
+      <span>Original instructor</span>
+      <b>${esc(original?.name||c.instructor||'Unassigned')}</b>
+    </div>
+
+    <label class="ct-sub-option remove-option">
+      <input type="radio" name="ctSubInstructor" value="" ${!currentSub?'checked':''}>
+      <span class="ct-sub-copy">
+        <b>No substitute</b>
+        <span class="ct-sub-badge neutral">Keep original instructor</span>
+      </span>
+    </label>
+
+    ${recommended.length?`
+      <h3 class="ct-sub-heading">Available for this class</h3>
+      <p class="muted">These instructors have this exact day, time and studio saved in Class hours.</p>
+      <div class="ct-sub-list">
+        ${recommended.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${other.length?`
+      <h3 class="ct-sub-heading">Other instructors</h3>
+      <p class="muted">You can still choose them manually even though this exact class hour is not in their saved schedule.</p>
+      <div class="ct-sub-list">
+        ${other.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${busy.length?`
+      <h3 class="ct-sub-heading">Unavailable at this time</h3>
+      <div class="ct-sub-list">
+        ${busy.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${!instructors.length?'<div class="empty">No other active instructors are available in Team yet.</div>':''}
+
+    <div style="margin-top:18px">
+      <button class="btn primary full" onclick="saveSubstitute('${classId}')">Save substitute</button>
+    </div>
+  `);
+}
+
+async function saveSubstitute(classId){
+  const picked=document.querySelector('input[name="ctSubInstructor"]:checked');
+  const uid=picked?.value||null;
+
+  if(uid){
+    const c=db.classes.find(x=>String(x.id)===String(classId));
+    const t=db.team.find(x=>String(x.auth_user_id||'')===String(uid));
+    const conflict=ctInstructorTimeConflict(t,c);
+    if(conflict){
+      return alert(`${t?.name||'This instructor'} is already teaching ${conflict.class_type||'another class'} at that time.`);
+    }
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {error}=await sb.rpc('set_class_substitute',{
+    p_class_id:classId,
+    p_substitute_user_id:uid
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save substitute'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert(uid?'Substitute assigned. This class will count under the substitute for teaching statistics.':'Substitute removed. The original instructor is back on the class.');
+}
+
+(function ctSmartSubstituteStyles(){
+  if(document.getElementById('ctSmartSubstituteStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctSmartSubstituteStyles';
+  s.textContent=`
+    .ct-sub-class{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      padding:12px 14px;
+      border-radius:12px;
+      background:rgba(114,47,55,.07);
+      margin-bottom:12px;
+    }
+    .ct-sub-original{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 2px 14px;
+      border-bottom:1px solid rgba(0,0,0,.08);
+      margin-bottom:10px;
+    }
+    .ct-sub-original span{color:#6B6B6B;font-size:13px}
+    .ct-sub-heading{margin:18px 0 4px}
+    .ct-sub-list{display:grid;gap:8px;margin-top:8px}
+    .ct-sub-option{
+      display:flex;
+      align-items:center;
+      gap:11px;
+      padding:12px 13px;
+      border:1px solid rgba(0,0,0,.10);
+      border-radius:12px;
+      cursor:pointer;
+      background:#fff;
+    }
+    .ct-sub-option:has(input:checked){
+      border-color:#722F37;
+      box-shadow:0 0 0 1px #722F37 inset;
+      background:rgba(114,47,55,.04);
+    }
+    .ct-sub-option.is-conflict{
+      opacity:.58;
+      cursor:not-allowed;
+    }
+    .ct-sub-option input{
+      width:auto;
+      margin:0;
+      flex:0 0 auto;
+    }
+    .ct-sub-copy{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      width:100%;
+    }
+    .ct-sub-badge{
+      font-size:11px;
+      padding:4px 7px;
+      border-radius:999px;
+      font-weight:600;
+    }
+    .ct-sub-badge.good{background:rgba(114,47,55,.09);color:#722F37}
+    .ct-sub-badge.neutral{background:#eeeae3;color:#666}
+    .ct-sub-badge.conflict{background:#f3dddd;color:#8b2f38}
+    .remove-option{margin-bottom:6px}
+    @media(max-width:600px){
+      .ct-sub-copy{align-items:flex-start;flex-direction:column}
+      .ct-sub-original{align-items:flex-start;flex-direction:column}
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
