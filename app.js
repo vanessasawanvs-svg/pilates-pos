@@ -3666,3 +3666,185 @@ function schedule(){
 }
 
 
+// ================= CORE THEORY — PASTE SCHEDULE REPEAT WEEKLY =================
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1">Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12">Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="16" placeholder="Monday
+8 Pilates Rise & Shine OL Vanessa
+9 Pilates Rise & Shine OL Vanessa
+10 Pilates Peach Please LI Lea
+
+Tuesday
+4 Megacore Dynamic LI Vanessa
+5 Megacore Dynamic LI Vanessa"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Shortcuts: B = Beginner · OL = Open Level · LI = Intermediate · LA = Advanced.
+          Instructor is optional.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  const total=parsed.rows.length*repeatWeeks;
+  const repeatCopy=repeatWeeks===1
+    ? 'This schedule will be created once.'
+    : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`;
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatCopy}<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Class</th>
+            <th>Level</th>
+            <th>Instructor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const repeatWeeks=Number(ctPasteScheduleRows[0]?.repeat_weeks||1);
+  const recurringGroup=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  ctPasteScheduleRows.forEach(r=>{
+    const base=new Date(`${r.class_date}T12:00:00`);
+
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+(w*7));
+
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.time,
+        class_type:r.class_type,
+        instructor:r.instructor_name||'',
+        instructor_user_id:r.instructor_user_id||null,
+        capacity:10,
+        studio_type:r.studio,
+        level:r.level,
+        recurring_group:recurringGroup
+      });
+    }
+  });
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(
+    repeatWeeks===1
+      ? `${payload.length} classes created.`
+      : `${payload.length} classes created across ${repeatWeeks} weeks.`
+  );
+
+  page='schedule';
+  render();
+}
+
+
