@@ -2833,3 +2833,257 @@ function ctApplyDisplayedInstructorToClientCards(){
   document.head.appendChild(s);
 })();
 
+
+// ================= CORE THEORY — CLIENT WEEKLY SCHEDULE NAVIGATION =================
+let clientBookWeekOffset = 0;
+
+function ctClientWeekStart(offset=0){
+  const d=new Date();
+  const day=(d.getDay()+6)%7; // Monday = 0
+  d.setHours(12,0,0,0);
+  d.setDate(d.getDate()-day+(offset*7));
+  return d;
+}
+
+function ctClientClassIsPast(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`) <= new Date();
+}
+
+function ctClientBookingClosed(c){
+  const start=new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+  return (start.getTime()-Date.now()) < 60*60*1000;
+}
+
+function ctClientClassCard(c){
+  const n=bookingCount(c.id);
+  const cap=Number(c.capacity||0);
+  const full=cap>0 && n>=cap;
+  const closed=ctClientBookingClosed(c);
+  const instructor = typeof ctDisplayedInstructor==='function'
+    ? ctDisplayedInstructor(c)
+    : (c.instructor||'');
+
+  let action='';
+  if(closed){
+    action=`<button class="btn full" disabled>Booking closed</button>`;
+  }else if(full){
+    action=`<button class="btn primary full" onclick="clientBook('${c.id}')">Join waitlist</button>`;
+  }else{
+    action=`<button class="btn primary full" onclick="clientBook('${c.id}')">Book</button>`;
+  }
+
+  return `
+    <div class="card ct-client-week-class">
+      <div class="ct-client-class-top">
+        <div>
+          <h3>${esc(c.class_type||'Class')}</h3>
+          <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+        </div>
+        ${full?'<span class="ct-full-badge">FULL</span>':''}
+      </div>
+      <p class="ct-client-class-time">${formatTime(String(c.class_time||'00:00').slice(0,5))}</p>
+      ${instructor?`<p class="muted">${esc(instructor)}</p>`:''}
+      ${action}
+    </div>`;
+}
+
+function book(){
+  const mon=ctClientWeekStart(clientBookWeekOffset);
+  const days=[];
+
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  const weekDates=new Set(days.map(dateISO));
+
+  const classes=(db.classes||[])
+    .filter(c=>
+      weekDates.has(c.class_date) &&
+      !c.cancelled &&
+      (c.studio_type||'Pilates')===studioTab &&
+      !ctClientClassIsPast(c)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  const grouped={};
+  days.forEach(d=>grouped[dateISO(d)]=[]);
+  classes.forEach(c=>(grouped[c.class_date]??=[]).push(c));
+
+  const weekLabel=
+    `${mon.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – `+
+    `${days[6].toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`;
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+    </div>
+
+    <div class="ct-client-week-nav">
+      <button class="btn" ${clientBookWeekOffset<=0?'disabled':''}
+        onclick="if(clientBookWeekOffset>0){clientBookWeekOffset--;book()}">← Previous</button>
+
+      <button class="btn" onclick="clientBookWeekOffset=0;book()">This week</button>
+
+      <button class="btn" onclick="clientBookWeekOffset++;book()">Next →</button>
+    </div>
+
+    <div class="ct-client-week-label">${esc(weekLabel)}</div>
+
+    <div class="ct-client-week-days">
+      ${days.map(d=>{
+        const key=dateISO(d);
+        const dayClasses=grouped[key]||[];
+        return `
+          <section class="ct-client-day">
+            <div class="ct-client-day-head">
+              <b>${d.toLocaleDateString(undefined,{weekday:'long'})}</b>
+              <span>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+            </div>
+            <div class="ct-client-day-classes">
+              ${dayClasses.map(ctClientClassCard).join('') || '<div class="ct-client-no-class">No classes</div>'}
+            </div>
+          </section>`;
+      }).join('')}
+    </div>
+  `,'Book a Class','Browse future weeks and reserve Pilates or Megacore classes');
+}
+
+(function ctClientWeekStyles(){
+  if(document.getElementById('ctClientWeekStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctClientWeekStyles';
+  s.textContent=`
+    .ct-client-week-nav{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin:14px 0 8px;
+    }
+
+    .ct-client-week-label{
+      margin:8px 0 14px;
+      font-weight:700;
+      color:#6B6B6B;
+    }
+
+    .ct-client-week-days{
+      display:grid;
+      grid-template-columns:repeat(7,minmax(150px,1fr));
+      gap:10px;
+      overflow-x:auto;
+      padding-bottom:8px;
+    }
+
+    .ct-client-day{
+      min-width:150px;
+    }
+
+    .ct-client-day-head{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      padding:9px 4px;
+      text-align:center;
+    }
+
+    .ct-client-day-head span{
+      font-size:12px;
+      color:#6B6B6B;
+    }
+
+    .ct-client-day-classes{
+      display:grid;
+      gap:9px;
+    }
+
+    .ct-client-week-class{
+      padding:13px !important;
+      min-height:170px;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .ct-client-week-class h3{
+      margin:0 0 7px;
+      font-size:16px;
+    }
+
+    .ct-client-class-top{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:flex-start;
+    }
+
+    .ct-client-class-time{
+      font-weight:700;
+      margin:12px 0 2px;
+    }
+
+    .ct-client-week-class .btn{
+      margin-top:auto;
+    }
+
+    .ct-full-badge{
+      padding:4px 7px;
+      border-radius:999px;
+      background:#722F37;
+      color:white;
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.07em;
+    }
+
+    .ct-client-no-class{
+      padding:18px 8px;
+      text-align:center;
+      color:#8a8a86;
+      font-size:12px;
+    }
+
+    @media(max-width:760px){
+      .ct-client-week-days{
+        display:block;
+        overflow:visible;
+      }
+
+      .ct-client-day{
+        margin-bottom:16px;
+      }
+
+      .ct-client-day-head{
+        text-align:left;
+        flex-direction:row;
+        justify-content:space-between;
+        border-bottom:1px solid rgba(0,0,0,.08);
+        margin-bottom:8px;
+      }
+
+      .ct-client-day-classes{
+        grid-template-columns:1fr;
+      }
+
+      .ct-client-week-class{
+        min-height:0;
+      }
+
+      .ct-client-week-nav{
+        display:grid;
+        grid-template-columns:1fr 1fr 1fr;
+      }
+
+      .ct-client-week-nav .btn{
+        width:100%;
+        padding-left:8px;
+        padding-right:8px;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
