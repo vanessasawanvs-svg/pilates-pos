@@ -2532,3 +2532,200 @@ async function saveSubstitute(classId){
   document.head.appendChild(s);
 })();
 
+
+// ================= CORE THEORY — ONE-OFF NON-LOGIN SUBSTITUTE =================
+function ctSubstituteDisplayNameForClass(c){
+  const active=(db.class_substitutions||[]).find(s=>String(s.class_id)===String(c.id)&&s.active);
+  if(!active)return null;
+  return active.substitute_name || db.team.find(t=>String(t.auth_user_id||'')===String(active.substitute_instructor||''))?.name || null;
+}
+
+function substituteClassModal(classId){
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return;
+
+  const current=(db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(classId) && s.active
+  );
+
+  const original=db.team.find(t=>String(t.auth_user_id||'')===String(c.instructor_user_id||''));
+
+  const instructors=(db.team||[])
+    .filter(t=>t.role==='Instructor'&&!t.archived_at)
+    .filter(t=>{
+      const sameAuth=t.auth_user_id && String(t.auth_user_id)===String(c.instructor_user_id||'');
+      const sameName=!t.auth_user_id && String(t.name||'').trim()===String(c.instructor||'').trim();
+      return !(sameAuth||sameName);
+    });
+
+  const ranked=instructors.map(t=>({
+    t,
+    slot:ctInstructorMatchesSavedSlot(t,c),
+    conflict:t.auth_user_id?ctInstructorTimeConflict(t,c):null
+  })).sort((a,b)=>{
+    if(Boolean(a.conflict)!==Boolean(b.conflict))return a.conflict?1:-1;
+    if(a.slot!==b.slot)return a.slot?-1:1;
+    if(Boolean(a.t.auth_user_id)!==Boolean(b.t.auth_user_id))return a.t.auth_user_id?-1:1;
+    return String(a.t.name||'').localeCompare(String(b.t.name||''));
+  });
+
+  const recommended=ranked.filter(x=>x.slot&&!x.conflict);
+  const other=ranked.filter(x=>!x.slot&&!x.conflict);
+  const busy=ranked.filter(x=>x.conflict);
+
+  function candidate(t,conflict=null,slot=false){
+    const isCurrentLogin=current?.substitute_instructor && String(current.substitute_instructor)===String(t.auth_user_id||'');
+    const isCurrentGuest=!current?.substitute_instructor && current?.substitute_team_id && String(current.substitute_team_id)===String(t.id);
+    const selected=isCurrentLogin||isCurrentGuest;
+
+    let badge='';
+    if(conflict){
+      badge=`<span class="ct-sub-badge conflict">Already teaching ${esc(conflict.class_type||'another class')}</span>`;
+    }else if(slot){
+      badge='<span class="ct-sub-badge good">Available · saved class hour</span>';
+    }else if(t.auth_user_id){
+      badge='<span class="ct-sub-badge neutral">Manual option</span>';
+    }else{
+      badge='<span class="ct-sub-badge neutral">One-off · no app access</span>';
+    }
+
+    return `
+      <label class="ct-sub-option ${conflict?'is-conflict':''}">
+        <input
+          type="radio"
+          name="ctSubInstructor"
+          value="${t.auth_user_id?`auth:${esc(t.auth_user_id)}`:`team:${esc(t.id)}`}"
+          ${selected?'checked':''}
+          ${conflict&&!selected?'disabled':''}
+        >
+        <span class="ct-sub-copy">
+          <b>${esc(t.name)}</b>
+          ${badge}
+        </span>
+      </label>`;
+  }
+
+  modal('Assign substitute',`
+    <div class="ct-sub-class">
+      <b>${esc(c.class_type||'Class')}</b>
+      <span>${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+      · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+      · ${esc(c.studio_type||'Pilates')}</span>
+    </div>
+
+    <div class="ct-sub-original">
+      <span>Original instructor</span>
+      <b>${esc(original?.name||c.instructor||'Unassigned')}</b>
+    </div>
+
+    <label class="ct-sub-option remove-option">
+      <input type="radio" name="ctSubInstructor" value="" ${!current?'checked':''}>
+      <span class="ct-sub-copy">
+        <b>No substitute</b>
+        <span class="ct-sub-badge neutral">Keep original instructor</span>
+      </span>
+    </label>
+
+    ${recommended.length?`
+      <h3 class="ct-sub-heading">Available for this class</h3>
+      <p class="muted">Exact saved day, time and studio match.</p>
+      <div class="ct-sub-list">
+        ${recommended.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    ${other.length?`
+      <h3 class="ct-sub-heading">Other instructors</h3>
+      <p class="muted">You can choose any instructor manually. “One-off · no app access” means they can cover the class without receiving a login.</p>
+      <div class="ct-sub-list">
+        ${other.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    ${busy.length?`
+      <h3 class="ct-sub-heading">Unavailable at this time</h3>
+      <div class="ct-sub-list">
+        ${busy.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    <div style="margin-top:18px">
+      <button class="btn primary full" onclick="saveSubstitute('${classId}')">Save substitute</button>
+    </div>
+  `);
+}
+
+async function saveSubstitute(classId){
+  const picked=document.querySelector('input[name="ctSubInstructor"]:checked');
+  const value=picked?.value||'';
+
+  let authUid=null, teamId=null;
+  if(value.startsWith('auth:'))authUid=value.slice(5);
+  if(value.startsWith('team:'))teamId=value.slice(5);
+
+  if(authUid){
+    const c=db.classes.find(x=>String(x.id)===String(classId));
+    const t=db.team.find(x=>String(x.auth_user_id||'')===String(authUid));
+    const conflict=ctInstructorTimeConflict(t,c);
+    if(conflict){
+      return alert(`${t?.name||'This instructor'} is already teaching ${conflict.class_type||'another class'} at that time.`);
+    }
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {error}=await sb.rpc('set_class_substitute_v2',{
+    p_class_id:String(classId),
+    p_substitute_user_id:authUid,
+    p_substitute_team_id:teamId
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save substitute'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  if(authUid){
+    alert('Substitute assigned. The class will count under that instructor account.');
+  }else if(teamId){
+    const t=db.team.find(x=>String(x.id)===String(teamId));
+    alert(`${t?.name||'Substitute'} assigned as a one-off substitute. No app access was given.`);
+  }else{
+    alert('Substitute removed. The original instructor is back on the class.');
+  }
+}
+
+// Make display + taught-count logic recognize one-off team substitutes too.
+function instructorForClass(c){
+  const sub=(db.class_substitutions||[]).find(s=>String(s.class_id)===String(c.id)&&s.active);
+  if(sub?.substitute_instructor)return sub.substitute_instructor;
+  if(sub?.substitute_team_id)return `team:${sub.substitute_team_id}`;
+  return c.instructor_user_id||null;
+}
+
+function instructorStats(uid,month=currentYM()){
+  const teamMatch=(db.team||[]).find(t=>String(t.auth_user_id||'')===String(uid||''));
+  const teamKey=teamMatch?`team:${teamMatch.id}`:null;
+
+  const own=db.classes.filter(c=>{
+    const assigned=instructorForClass(c);
+    return String(assigned||'')===String(uid||'') || (teamKey && String(assigned||'')===teamKey);
+  });
+
+  const monthClasses=own.filter(c=>ym(c.class_date)===month&&!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date());
+  return {
+    scheduled:monthClasses.length,
+    taught:monthClasses.filter(classWasTaught).length,
+    total:own.filter(classWasTaught).length
+  };
+}
+
+function classesTaughtCount(t){
+  if(t.auth_user_id)return instructorStats(t.auth_user_id).total;
+
+  const key=`team:${t.id}`;
+  const own=db.classes.filter(c=>String(instructorForClass(c)||'')===key);
+  return own.filter(classWasTaught).length;
+}
+
