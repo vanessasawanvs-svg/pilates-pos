@@ -3969,3 +3969,70 @@ async function ctCancelFutureSeries(id){
   alert(`${cancelled} repeated classes were cancelled.`);
 }
 
+
+// ================= CORE THEORY — HIDE CANCELLED CLASSES COMPLETELY =================
+
+// Cancelled classes should remain in the database for booking/history safety,
+// but must disappear completely from every timetable/schedule view.
+function scheduleTable(days,type){
+  const dates=new Set(days.map(dateISO));
+
+  const cs=(db.classes||[]).filter(c=>
+    dates.has(c.class_date) &&
+    !c.cancelled &&
+    (c.studio_type||'Pilates')===type
+  );
+
+  const times=[...new Set(
+    cs.map(c=>(c.class_time||'').slice(0,5)).filter(Boolean)
+  )].sort();
+
+  if(!times.length){
+    for(let h=7;h<=20;h++){
+      times.push(String(h).padStart(2,'0')+':00');
+    }
+  }
+
+  return `
+    <div class="card schedule-wrap">
+      <table class="weekly-schedule">
+        <thead>
+          <tr>
+            <th class="time-col">Time</th>
+            ${days.map(d=>`
+              <th>
+                ${d.toLocaleDateString(undefined,{weekday:'long'})}
+                <small>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</small>
+              </th>
+            `).join('')}
+          </tr>
+        </thead>
+
+        <tbody>
+          ${times.map(t=>`
+            <tr>
+              <th class="time-col">${formatTime(t)}</th>
+              ${days.map(d=>`
+                <td class="schedule-cell">
+                  ${cs
+                    .filter(c=>
+                      c.class_date===dateISO(d) &&
+                      (c.class_time||'').slice(0,5)===t
+                    )
+                    .map(classCard)
+                    .join('')
+                  }
+                </td>
+              `).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// Also make sure other schedule-facing lists never show cancelled classes.
+function ctVisibleScheduleClasses(list=[]){
+  return (list||[]).filter(c=>!c.cancelled);
+}
+
