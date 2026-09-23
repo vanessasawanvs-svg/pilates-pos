@@ -21,7 +21,11 @@ async function savePassword(e){e.preventDefault();if($("#pw1").value!==$("#pw2")
 async function logout(){await sb.auth.signOut();session=null;profile=null;authScreen()}
 
 async function loadAll(){
-if(!session)return authScreen();$("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(pr.error)return authScreen("Profile error: "+pr.error.message);profile=pr.data;if(!profile)return authScreen("This account does not have a Core Theory profile yet.");if(isClient()){await sb.rpc("ensure_client_record");await sb.rpc("issue_my_birthday_reward");}if(isOwner()){await sb.rpc('process_today_birthdays');}const tables=isOwner()?['clients','memberships','products','sales','expenses','classes','team','bookings','class_levels','package_orders','notification_settings','notification_queue','studio_settings','announcements','promo_codes','custom_sections','custom_entries','audit_log','instructor_availability','instructor_class_slots','client_packages','class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings','client_notes','package_freezes','payroll_adjustments','client_notifications']:isInstructor()?['classes','bookings','class_levels','announcements','studio_events','client_notes']:isReceptionist()?[]:['clients','memberships','classes','bookings','class_levels','package_orders','announcements','client_packages','client_rewards','studio_events','client_notifications'];db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[],roster:[],guestRoster:[]};const rs=await Promise.all(tables.map(t=>sb.from(t).select("*")));const bad=rs.find(x=>x.error);if(bad)return authScreen("Database error: "+bad.error.message);tables.forEach((t,i)=>db[t]=rs[i].data||[]);if(isClient()){const cp=await sb.rpc('client_payment_history');if(!cp.error)db.client_payments=cp.data||[]}if(isInstructor()){const [rr,mc,gr]=await Promise.all([sb.rpc('my_instructor_roster'),sb.rpc('my_instructor_classes'),sb.rpc('my_instructor_guest_roster')]);if(rr.error)return authScreen('Schedule access error: '+rr.error.message);if(mc.error)return authScreen('Schedule access error: '+mc.error.message);db.roster=rr.data||[];db.classes=mc.data||[];db.guestRoster=gr.error?[]:(gr.data||[]);}if(isFrontDeskStaff()){const fd=await sb.rpc('is_front_desk_on_duty');db.frontDeskDuty=fd.data===true;if(db.frontDeskDuty){const [fr,fm,fp,fc]=await Promise.all([sb.rpc('front_desk_today'),sb.rpc('front_desk_memberships_v2'),sb.rpc('front_desk_products'),sb.rpc('front_desk_booking_classes',{p_days:14})]);if(!fr.error)db.frontDeskToday=fr.data||[];if(!fm.error)db.frontDeskMemberships=fm.data||[];if(!fp.error)db.frontDeskProducts=fp.data||[];if(!fc.error)db.frontDeskBookingClasses=fc.data||[];}}if(isInstructor()){const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page='instructorhome';}if(isReceptionist()){const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';}if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page))page='clienthome';render()}
+if(!session)return authScreen();$("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(pr.error)return authScreen("Profile error: "+pr.error.message);profile=pr.data;if(!profile)return authScreen("This account does not have a Core Theory profile yet.");if(isClient()){await sb.rpc("ensure_client_record");await sb.rpc("issue_my_birthday_reward");}if(isOwner()){await sb.rpc('process_today_birthdays');}const tables=isOwner()?['clients','memberships','products','sales','expenses','classes','team','bookings','class_levels','package_orders','notification_settings','notification_queue','studio_settings','announcements','promo_codes','custom_sections','custom_entries','audit_log','instructor_availability','instructor_class_slots','client_packages','class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings','client_notes','package_freezes','payroll_adjustments','client_notifications']:isInstructor()?['classes','bookings','class_levels','announcements','studio_events','client_notes']:isReceptionist()?[]:['clients','memberships','classes','bookings','class_levels','package_orders','announcements','client_packages','client_rewards','studio_events','client_notifications'];db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[],roster:[],guestRoster:[]};const rs=await Promise.all(tables.map(t=>sb.from(t).select("*")));const bad=rs.find(x=>x.error);if(bad)return authScreen("Database error: "+bad.error.message);tables.forEach((t,i)=>db[t]=rs[i].data||[]);if(isClient()){const cp=await sb.rpc('client_payment_history');if(!cp.error)db.client_payments=cp.data||[]}if(isInstructor()){const [rr,mc,gr]=await Promise.all([sb.rpc('my_instructor_roster'),sb.rpc('my_instructor_classes_v2'),sb.rpc('my_instructor_guest_roster')]);if(rr.error)return authScreen('Schedule access error: '+rr.error.message);if(mc.error)return authScreen('Schedule access error: '+mc.error.message);db.roster=rr.data||[];db.classes=mc.data||[];db.guestRoster=gr.error?[]:(gr.data||[]);}if(isClient()||isInstructor()){
+  const subs=await sb.rpc('visible_active_class_substitutions');
+  if(!subs.error)db.class_substitutions=subs.data||[];
+}
+if(isFrontDeskStaff()){const fd=await sb.rpc('is_front_desk_on_duty');db.frontDeskDuty=fd.data===true;if(db.frontDeskDuty){const [fr,fm,fp,fc]=await Promise.all([sb.rpc('front_desk_today'),sb.rpc('front_desk_memberships_v2'),sb.rpc('front_desk_products'),sb.rpc('front_desk_booking_classes',{p_days:14})]);if(!fr.error)db.frontDeskToday=fr.data||[];if(!fm.error)db.frontDeskMemberships=fm.data||[];if(!fp.error)db.frontDeskProducts=fp.data||[];if(!fc.error)db.frontDeskBookingClasses=fc.data||[];}}if(isInstructor()){const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page='instructorhome';}if(isReceptionist()){const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';}if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page))page='clienthome';render()}
 function nav(){const pages=isOwner()?['dashboard','clients','schedule','pos','memberships','inventory','expenses','finance','team','operations','settings']:isInstructor()?['instructorhome','schedule',...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:isReceptionist()?[...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:['clienthome','book','mybookings','packages','clientaccount'];const labels={dashboard:'⌂ Dashboard',instructorhome:'⌂ Home',clienthome:'⌂ Home',clients:'◎ Clients',schedule:'□ Schedule',pos:'$ POS / Sales',memberships:'◇ Memberships',inventory:'▣ Inventory',expenses:'− Expenses',finance:'↗ Finance',team:'◌ Team',operations:'✦ Operations',settings:'⚙ Settings',payment:'$ Record Payment',frontdesk:'$ Front Desk',account:'⚙ Account',book:'□ Book a Class',mybookings:'✓ My Bookings',packages:'◇ Packages',clientaccount:'◎ My Account'};return pages.map(x=>`<button data-page="${x}" class="${page===x?'active':''}">${labels[x]}</button>`).join('')+(isOwner()?db.custom_sections.filter(x=>x.visible_owner!==false).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(x=>`<button data-custom="${x.id}" class="${page==='custom:'+x.id?'active':''}">${esc(x.icon||'•')} ${esc(x.name)}</button>`).join(''):'')}
 function activeAnnouncementBanners(){const target=isClient()?'Clients':(isInstructor()||isReceptionist())?'Instructors':'Everyone';return (db.announcements||[]).filter(a=>a.active!==false&&(isOwner()||a.audience==='Everyone'||a.audience===target)).map(a=>`<div class="notice card" style="margin-bottom:12px"><b>${esc(a.title)}</b><p>${esc(a.message)}</p></div>`).join('')}
 function layout(content,title,subtitle=''){const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';$("#app").innerHTML=`<div class="app"><aside class="sidebar"><div class="brand">CORE THEORY<small>${role} Portal</small></div><div class="nav">${nav()}</div><div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div><button class="btn logout" onclick="logout()">Log out</button></aside><main class="main"><div class="topbar"><div><h1>${title}</h1><p>${subtitle}</p><div class="sync-note">☁ Cloud connected</div></div><button class="btn" onclick="loadAll()">Refresh</button></div>${activeAnnouncementBanners()}${content}</main></div>`;document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{page='custom:'+b.dataset.custom;render()})}
@@ -3086,4 +3090,148 @@ function book(){
   `;
   document.head.appendChild(s);
 })();
+
+
+// ================= CORE THEORY — SUBSTITUTION OWNERSHIP + PAYROLL =================
+function teamInstructorStats(t,month=currentYM()){
+  if(!t)return {scheduled:0,taught:0,total:0};
+
+  const loginKey=t.auth_user_id?String(t.auth_user_id):null;
+  const teamKey=`team:${t.id}`;
+
+  const own=(db.classes||[]).filter(c=>{
+    if(c.cancelled)return false;
+    const assigned=instructorForClass(c);
+    return (loginKey && String(assigned||'')===loginKey) || String(assigned||'')===teamKey;
+  });
+
+  const monthClasses=own.filter(c=>
+    ym(c.class_date)===month &&
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date()
+  );
+
+  return {
+    scheduled:monthClasses.length,
+    taught:monthClasses.filter(classWasTaught).length,
+    total:own.filter(classWasTaught).length
+  };
+}
+
+function team(){
+  const month=document.getElementById('teamMonth')?.value||currentYM();
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button>
+        <button class="btn" onclick="teamModal()">+ Add non-login team member</button>
+        <button class="btn" onclick="autoAssignUnassignedClasses()">↻ Assign schedule from class hours</button>
+        <input type="month" id="teamMonth" value="${month}" onchange="team()">
+      </div>
+
+      <div class="warning" style="margin-bottom:14px">
+        Substituted classes count under the instructor who actually covers them. The original instructor is not paid for that class.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Class hours</th>
+            <th>This month</th>
+            <th>Scheduled</th>
+            <th>Total taught</th>
+            <th>Class rate</th>
+            <th>Est. pay</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${db.team.filter(t=>!t.archived_at).map(t=>{
+            const instructor=String(t.role||'').toLowerCase()==='instructor';
+            const s=instructor?teamInstructorStats(t,month):{taught:0,scheduled:0,total:0};
+            const rate=Number(t.class_rate||0);
+
+            return `
+              <tr>
+                <td>
+                  <b>${esc(t.name)}</b>
+                  <div class="muted">${esc(t.email||'')}</div>
+                </td>
+                <td>${esc(t.role||'')}</td>
+                <td>${instructor?ctInstructorSlotSummary(t):'<span class="muted">—</span>'}</td>
+                <td>${instructor?`<b>${s.taught}</b>`:'—'}</td>
+                <td>${instructor?s.scheduled:'—'}</td>
+                <td>${instructor?s.total:'—'}</td>
+                <td>${instructor?money(rate):'—'}</td>
+                <td>${instructor?`<b>${money(s.taught*rate)}</b>`:'—'}</td>
+                <td>
+                  <button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>
+                  ${instructor?` <button class="btn small" onclick="instructorSlotsModal('${t.id}')">Class hours</button>`:''}
+                  ${instructor?` <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button>`:''}
+                  ${t.auth_user_id?`
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>
+                  `:''}
+                  ${!t.auth_user_id?` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`:''}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`,
+    'Team',
+    'Exact class-hour coverage, substitutions, teaching and payroll'
+  );
+}
+
+function payrollModal(teamId){
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  if(!t)return;
+
+  const m=currentYM();
+  const s=teamInstructorStats(t,m);
+  const adjs=(db.payroll_adjustments||[]).filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m);
+  const adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0);
+  const base=s.taught*Number(t.class_rate||0);
+
+  modal(`${esc(t.name)} payroll`,`
+    <label>Month</label>
+    <input id="payMonth" type="month" value="${m}" onchange="payrollMonthRefresh('${teamId}')">
+
+    <div id="payrollBody">
+      <div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div>
+      <div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div>
+      <div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div>
+      <div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div>
+      <div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>
+    </div>
+
+    <p class="muted">A substituted class is paid to the substitute only if it meets the taught-class rule.</p>
+
+    <h3>Add adjustment</h3>
+    <label>Amount (+ or -)</label>
+    <input id="payAdj" type="number" step=".01">
+    <label>Reason</label>
+    <input id="payReason">
+    <button class="btn primary full" onclick="addPayrollAdjustment('${teamId}')">Add adjustment</button>
+  `);
+}
+
+async function payrollMonthRefresh(teamId){
+  const m=$("#payMonth").value;
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  const s=teamInstructorStats(t,m);
+  const adjs=(db.payroll_adjustments||[]).filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m);
+  const adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0);
+  const base=s.taught*Number(t.class_rate||0);
+
+  $("#payrollBody").innerHTML=`
+    <div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div>
+    <div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div>
+    <div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div>
+    <div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div>
+    <div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>`;
+}
 
