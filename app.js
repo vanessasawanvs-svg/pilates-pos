@@ -3235,3 +3235,434 @@ async function payrollMonthRefresh(teamId){
     <div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>`;
 }
 
+
+// ================= CORE THEORY — PASTE SCHEDULE BUILDER =================
+
+function ctNormalizeLevel(raw=''){
+  const v=String(raw).trim().toLowerCase();
+
+  const aliases={
+    'b':'Beginner',
+    'beg':'Beginner',
+    'beginner':'Beginner',
+    'ol':'Open Level',
+    'open':'Open Level',
+    'open level':'Open Level',
+    'li':'Intermediate',
+    'int':'Intermediate',
+    'intermediate':'Intermediate',
+    'la':'Advanced',
+    'adv':'Advanced',
+    'advanced':'Advanced'
+  };
+
+  const direct=aliases[v];
+  if(direct)return direct;
+
+  const match=(db.class_levels||[]).find(x=>String(x.name||'').toLowerCase()===v);
+  return match?.name || String(raw).trim();
+}
+
+function ctNormalizeStudio(raw=''){
+  const v=String(raw).trim().toLowerCase();
+  if(['pilates','p','reformer'].includes(v))return 'Pilates';
+  if(['megacore','mega','m','lagree'].includes(v))return 'Megacore';
+  return '';
+}
+
+function ctParseTime(raw=''){
+  let v=String(raw).trim().toLowerCase().replace(/\s+/g,'');
+
+  const ampm=v.match(/^(1[0-2]|0?[1-9])(?::([0-5]\d))?(am|pm)$/);
+  if(ampm){
+    let h=Number(ampm[1]);
+    const m=Number(ampm[2]||0);
+    if(ampm[3]==='pm'&&h!==12)h+=12;
+    if(ampm[3]==='am'&&h===12)h=0;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  const hhmm=v.match(/^([01]?\d|2[0-3])(?::([0-5]\d))?$/);
+  if(hhmm){
+    const h=Number(hhmm[1]);
+    const m=Number(hhmm[2]||0);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  return '';
+}
+
+function ctDayName(raw=''){
+  const v=String(raw).trim().toLowerCase().replace(':','');
+  const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const aliases={
+    sun:'Sunday',sunday:'Sunday',
+    mon:'Monday',monday:'Monday',
+    tue:'Tuesday',tues:'Tuesday',tuesday:'Tuesday',
+    wed:'Wednesday',wednesday:'Wednesday',
+    thu:'Thursday',thur:'Thursday',thurs:'Thursday',thursday:'Thursday',
+    fri:'Friday',friday:'Friday',
+    sat:'Saturday',saturday:'Saturday'
+  };
+  return aliases[v]||days.find(d=>d.toLowerCase()===v)||'';
+}
+
+function ctUpcomingDateForDay(dayName, weekOffset=0){
+  const dayIndex=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(dayName);
+  if(dayIndex<0)return '';
+
+  const mon=mondayOfWeek(weekOffset);
+  const mondayBased=(dayIndex+6)%7;
+
+  const d=new Date(mon);
+  d.setDate(mon.getDate()+mondayBased);
+  return dateISO(d);
+}
+
+function ctFindInstructorByName(name=''){
+  const n=String(name).trim().toLowerCase();
+  if(!n)return null;
+
+  const active=(db.team||[]).filter(t=>t.role==='Instructor'&&!t.archived_at);
+
+  let exact=active.find(t=>String(t.name||'').trim().toLowerCase()===n);
+  if(exact)return exact;
+
+  // Allow first-name-only if unique.
+  const first=active.filter(t=>String(t.name||'').trim().toLowerCase().split(/\s+/)[0]===n);
+  return first.length===1?first[0]:null;
+}
+
+function ctTrySplitScheduleLine(line){
+  const raw=String(line||'').trim();
+  if(!raw)return null;
+
+  const tokens=raw.split(/\s+/);
+  if(tokens.length<3)return null;
+
+  // first token must be time
+  const time=ctParseTime(tokens[0]);
+  if(!time)return null;
+
+  // second token must be studio
+  const studio=ctNormalizeStudio(tokens[1]);
+  if(!studio)return null;
+
+  let rest=tokens.slice(2);
+
+  // Try to detect instructor from the end (exact full name first, then unique first name).
+  let instructor=null;
+  let instructorTokenCount=0;
+
+  const instructors=(db.team||[]).filter(t=>t.role==='Instructor'&&!t.archived_at);
+  const restJoined=rest.join(' ');
+
+  const candidates=instructors
+    .map(t=>({t,name:String(t.name||'').trim()}))
+    .filter(x=>x.name)
+    .sort((a,b)=>b.name.length-a.name.length);
+
+  for(const x of candidates){
+    if(restJoined.toLowerCase().endsWith(x.name.toLowerCase())){
+      instructor=x.t;
+      instructorTokenCount=x.name.split(/\s+/).length;
+      break;
+    }
+  }
+
+  if(!instructor && rest.length){
+    const possible=ctFindInstructorByName(rest[rest.length-1]);
+    if(possible){
+      instructor=possible;
+      instructorTokenCount=1;
+    }
+  }
+
+  if(instructorTokenCount){
+    rest=rest.slice(0,-instructorTokenCount);
+  }
+
+  // Detect level from the end.
+  let level='';
+  let levelTokenCount=0;
+
+  const possibleTwo=rest.slice(-2).join(' ');
+  const possibleOne=rest.slice(-1).join(' ');
+
+  const normalizedTwo=ctNormalizeLevel(possibleTwo);
+  const normalizedOne=ctNormalizeLevel(possibleOne);
+
+  const knownLevels=(db.class_levels||[]).map(x=>String(x.name||'').toLowerCase());
+
+  if(possibleTwo && (
+      ['open level'].includes(possibleTwo.toLowerCase()) ||
+      knownLevels.includes(normalizedTwo.toLowerCase())
+    )){
+    level=normalizedTwo;
+    levelTokenCount=2;
+  }else if(possibleOne){
+    const aliases=['b','beg','beginner','ol','open','li','int','intermediate','la','adv','advanced'];
+    if(aliases.includes(possibleOne.toLowerCase()) || knownLevels.includes(normalizedOne.toLowerCase())){
+      level=normalizedOne;
+      levelTokenCount=1;
+    }
+  }
+
+  if(levelTokenCount){
+    rest=rest.slice(0,-levelTokenCount);
+  }
+
+  const className=rest.join(' ').trim();
+
+  if(!className)return null;
+
+  return {
+    time,
+    studio,
+    class_type:className,
+    level:level||'Open Level',
+    instructor_name:instructor?.name||'',
+    instructor_user_id:instructor?.auth_user_id||null,
+    instructor_team_id:instructor?.id||null
+  };
+}
+
+function ctParsePastedSchedule(text, weekOffset=0){
+  const lines=String(text||'').split(/\r?\n/);
+  const rows=[];
+  const errors=[];
+  let currentDay='';
+
+  lines.forEach((line,idx)=>{
+    const trimmed=line.trim();
+    if(!trimmed)return;
+
+    const maybeDay=ctDayName(trimmed);
+    if(maybeDay){
+      currentDay=maybeDay;
+      return;
+    }
+
+    if(!currentDay){
+      errors.push(`Line ${idx+1}: add a day heading before "${trimmed}"`);
+      return;
+    }
+
+    const parsed=ctTrySplitScheduleLine(trimmed);
+    if(!parsed){
+      errors.push(`Line ${idx+1}: couldn't understand "${trimmed}"`);
+      return;
+    }
+
+    rows.push({
+      ...parsed,
+      day:currentDay,
+      class_date:ctUpcomingDateForDay(currentDay,weekOffset)
+    });
+  });
+
+  return {rows,errors};
+}
+
+let ctPasteScheduleRows=[];
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1">Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="16" placeholder="Monday
+8 Pilates Rise & Shine OL Vanessa
+9 Pilates Rise & Shine OL Vanessa
+10 Pilates Peach Please LI Lea
+
+Tuesday
+4 Megacore Dynamic LI Vanessa
+5 Megacore Dynamic LI Vanessa"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Shortcuts: B = Beginner · OL = Open Level · LI = Intermediate · LA = Advanced.
+          Instructor is optional.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows;
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Class</th>
+            <th>Level</th>
+            <th>Instructor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${parsed.rows.length} Classes</button>
+    </div>
+  `);
+}
+
+function removePastedScheduleRow(i){
+  ctPasteScheduleRows.splice(i,1);
+
+  if(!ctPasteScheduleRows.length){
+    return pasteScheduleModal();
+  }
+
+  const rowsHtml=ctPasteScheduleRows.map((r,idx)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${idx})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const body=$("#ctPastePreviewBody");
+  if(body)body.innerHTML=rowsHtml;
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const payload=ctPasteScheduleRows.map(r=>({
+    class_date:r.class_date,
+    class_time:r.time,
+    class_type:r.class_type,
+    instructor:r.instructor_name||'',
+    instructor_user_id:r.instructor_user_id||null,
+    capacity:10,
+    studio_type:r.studio,
+    level:r.level,
+    recurring_group:null
+  }));
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  // If instructor was left blank, apply existing exact Class Hours assignment rules.
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(`${payload.length} classes created.`);
+  page='schedule';
+  render();
+}
+
+
+// Override Owner schedule toolbar to add Paste Schedule.
+function schedule(){
+  const mon=mondayOfWeek(scheduleWeekOffset),days=[];
+  for(let i=0;i<6;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';schedule()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';schedule()">MEGACORE</button>
+    </div>
+
+    <div class="schedule-tools">
+      <div class="toolbar">
+        ${isOwner()?`
+          <button class="btn primary" onclick="classModal()">+ Add class</button>
+          <button class="btn" onclick="pasteScheduleModal()">Paste Schedule</button>
+        `:''}
+
+        <button class="btn" onclick="scheduleWeekOffset--;schedule()">← Previous</button>
+        <button class="btn" onclick="scheduleWeekOffset=0;schedule()">This week</button>
+        <button class="btn" onclick="scheduleWeekOffset++;schedule()">Next →</button>
+      </div>
+    </div>
+
+    ${scheduleTable(days,studioTab)}
+  `,
+  'Schedule',
+  `${studioTab} weekly timetable — same times stay on the same row`);
+}
+
+
