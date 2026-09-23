@@ -5053,3 +5053,287 @@ async function loadAll(){
   render();
 }
 
+
+
+// ================= CORE THEORY — RELIABLE PASTE SCHEDULE V2 =================
+// Fully self-contained parser. Expected:
+// Monday
+// 8 AM | Pilates | Open Level | By the Book | 5
+
+let ct2PasteRows=[];
+let ct2PasteWeekOffset=1;
+
+function ct2Day(v){
+  const x=String(v||'').trim().replace(/:$/,'').toLowerCase();
+  const map={
+    monday:'Monday',tuesday:'Tuesday',wednesday:'Wednesday',
+    thursday:'Thursday',friday:'Friday',saturday:'Saturday',sunday:'Sunday'
+  };
+  return map[x]||'';
+}
+
+function ct2Time(v){
+  const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');
+  let m=x.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+  if(m){
+    let h=Number(m[1]), min=Number(m[2]||0);
+    if(h<1||h>12||min>59)return '';
+    if(m[3]==='PM'&&h!==12)h+=12;
+    if(m[3]==='AM'&&h===12)h=0;
+    return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  }
+  m=x.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if(m)return `${String(Number(m[1])).padStart(2,'0')}:${m[2]}`;
+  return '';
+}
+
+function ct2Level(v){
+  const raw=String(v||'').trim();
+  const key=raw.toLowerCase().replace(/\s+/g,' ');
+  const aliases={
+    'b':'Beginner','beginner':'Beginner',
+    'ol':'Open Level','open':'Open Level','open level':'Open Level',
+    'li':'Intermediate','intermediate':'Intermediate',
+    'la':'Advanced','advanced':'Advanced'
+  };
+  const wanted=aliases[key]||raw;
+  const found=(db.class_levels||[]).find(
+    l=>String(l.name||'').trim().toLowerCase()===String(wanted).trim().toLowerCase()
+  );
+  return found?.name||'';
+}
+
+function ct2Studio(v){
+  const x=String(v||'').trim().toLowerCase().replace(/\s+/g,'');
+  if(x==='pilates'||x==='reformer')return 'Pilates';
+  if(x==='megacore'||x==='mega'||x==='lagree')return 'Megacore';
+  return '';
+}
+
+function ct2DateForDay(dayName,weekOffset){
+  const monday=mondayOfWeek(Number(weekOffset)||0);
+  const indexes={Monday:0,Tuesday:1,Wednesday:2,Thursday:3,Friday:4,Saturday:5,Sunday:6};
+  const d=new Date(monday);
+  d.setDate(monday.getDate()+indexes[dayName]);
+  return dateISO(d);
+}
+
+function ct2Parse(text,weekOffset){
+  const rows=[],errors=[];
+  let day='';
+
+  String(text||'').split(/\r?\n/).forEach((original,i)=>{
+    const line=original.trim();
+    if(!line)return;
+
+    const maybeDay=ct2Day(line);
+    if(maybeDay){
+      day=maybeDay;
+      return;
+    }
+
+    if(!day){
+      errors.push(`Line ${i+1}: write the weekday first.`);
+      return;
+    }
+
+    const p=line.split('|').map(x=>x.trim());
+    if(p.length!==5){
+      errors.push(`Line ${i+1}: use Time | Studio | Level | Class Name | Capacity`);
+      return;
+    }
+
+    const [timeRaw,studioRaw,levelRaw,classRaw,capRaw]=p;
+    const time=ct2Time(timeRaw);
+    const studio=ct2Studio(studioRaw);
+    const level=ct2Level(levelRaw);
+    const className=String(classRaw||'').trim();
+    const capacity=Number(capRaw);
+
+    if(!time){errors.push(`Line ${i+1}: invalid time "${timeRaw}".`);return;}
+    if(!studio){errors.push(`Line ${i+1}: studio must be Pilates or Megacore.`);return;}
+    if(!level){errors.push(`Line ${i+1}: level "${levelRaw}" is not in Class Levels.`);return;}
+    if(!className){errors.push(`Line ${i+1}: class name is missing.`);return;}
+    if(!Number.isInteger(capacity)||capacity<1){errors.push(`Line ${i+1}: capacity must be a whole number.`);return;}
+
+    rows.push({
+      day,
+      class_date:ct2DateForDay(day,weekOffset),
+      class_time:time,
+      studio_type:studio,
+      level,
+      class_type:className,
+      capacity
+    });
+  });
+
+  return {rows,errors};
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="24" spellcheck="false" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | 5
+9 AM | Pilates | Beginner | By the Book | 5
+10 AM | Pilates | Open Level | Cheeky Business | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Use exactly: <b>Time | Studio | Level | Class Name | Capacity</b><br>
+          No instructor name.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" type="button" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ct2Parse(text,weekOffset);
+
+  if(parsed.errors.length){
+    return alert('Nothing was added. Fix these lines first:\n\n'+parsed.errors.join('\n'));
+  }
+  if(!parsed.rows.length)return alert('No classes found.');
+
+  ct2PasteWeekOffset=weekOffset;
+  ct2PasteRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  const total=ct2PasteRows.length*repeatWeeks;
+
+  modal('Preview Schedule',`
+    <div class="notice card" style="margin-bottom:12px">
+      <b>${ct2PasteRows.length} classes per week</b><br>
+      ${repeatWeeks===1?'One week only':`Repeating for ${repeatWeeks} weeks`}<br>
+      <b>${total} total classes</b>
+    </div>
+
+    <div class="card" style="overflow:auto;max-height:55vh">
+      <table>
+        <thead><tr>
+          <th>Day</th><th>Date</th><th>Time</th><th>Studio</th>
+          <th>Level</th><th>Class</th><th>Capacity</th>
+        </tr></thead>
+        <tbody>
+          ${ct2PasteRows.map(r=>`<tr>
+            <td>${esc(r.day)}</td>
+            <td>${esc(r.class_date)}</td>
+            <td>${formatTime(r.class_time)}</td>
+            <td>${esc(r.studio_type)}</td>
+            <td>${esc(r.level)}</td>
+            <td>${esc(r.class_type)}</td>
+            <td>${r.capacity}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" type="button" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" id="ct2CreateBtn" type="button" onclick="savePastedSchedule()">
+        Create ${total} Classes
+      </button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ct2PasteRows.length)return alert('Preview the schedule first.');
+
+  const repeatWeeks=Number(ct2PasteRows[0].repeat_weeks||1);
+  const group=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  for(const r of ct2PasteRows){
+    const base=new Date(r.class_date+'T12:00:00');
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+w*7);
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.class_time,
+        class_type:r.class_type,
+        instructor:'',
+        instructor_user_id:null,
+        capacity:r.capacity,
+        studio_type:r.studio_type,
+        level:r.level,
+        recurring_group:group
+      });
+    }
+  }
+
+  const btn=$("#ct2CreateBtn");
+  if(btn){btn.disabled=true;btn.textContent='Creating…';}
+
+  // Insert in small batches for reliability.
+  const batchSize=100;
+  let created=0;
+
+  for(let i=0;i<payload.length;i+=batchSize){
+    const batch=payload.slice(i,i+batchSize);
+    const {error}=await sb.from('classes').insert(batch);
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Try Again';}
+      await loadAll();
+      return alert(
+        `${created} classes were created before an error stopped the paste:\n\n${error.message}`
+      );
+    }
+
+    created+=batch.length;
+    if(btn)btn.textContent=`Creating… ${created}/${payload.length}`;
+  }
+
+  // Instructor auto-assignment is separate; a failure here should NOT undo the schedule.
+  try{ await sb.rpc('auto_assign_classes_from_slots'); }catch(e){}
+
+  ct2PasteRows=[];
+  $("#modal")?.remove();
+
+  await loadAll();
+  scheduleWeekOffset=ct2PasteWeekOffset;
+  studioTab='Pilates';
+  page='schedule';
+  schedule();
+
+  alert(`${created} classes created successfully.`);
+}
+
