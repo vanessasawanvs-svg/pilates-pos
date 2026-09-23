@@ -5337,3 +5337,99 @@ async function savePastedSchedule(){
   alert(`${created} classes created successfully.`);
 }
 
+
+
+// ================= CORE THEORY — CLIENT WEEKLY SCHEDULE DIRECT LOAD FIX =================
+// The client booking page now loads the selected week directly from Supabase.
+// It no longer depends on the large all-classes cache, which can make days disappear
+// when the studio has a very large recurring timetable.
+
+async function book(){
+  const mon=ctClientWeekStart(clientBookWeekOffset);
+  const days=[];
+
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  const startDate=dateISO(days[0]);
+  const endDate=dateISO(days[6]);
+
+  // Show the page shell immediately.
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+    </div>
+
+    <div class="ct-client-week-nav">
+      <button class="btn" ${clientBookWeekOffset<=0?'disabled':''}
+        onclick="if(clientBookWeekOffset>0){clientBookWeekOffset--;book()}">← Previous</button>
+
+      <button class="btn" onclick="clientBookWeekOffset=0;book()">This week</button>
+
+      <button class="btn" onclick="clientBookWeekOffset++;book()">Next →</button>
+    </div>
+
+    <div class="ct-client-week-label">
+      ${esc(
+        `${mon.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – `+
+        `${days[6].toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`
+      )}
+    </div>
+
+    <div id="ctClientWeekBody" class="ct-client-week-days">
+      <div class="card empty">Loading classes…</div>
+    </div>
+  `,'Book a Class','Browse future weeks and reserve Pilates or Megacore classes');
+
+  const box=$("#ctClientWeekBody");
+  if(!box)return;
+
+  const {data,error}=await sb
+    .from('classes')
+    .select('*')
+    .gte('class_date',startDate)
+    .lte('class_date',endDate)
+    .eq('studio_type',studioTab)
+    .eq('cancelled',false)
+    .order('class_date',{ascending:true})
+    .order('class_time',{ascending:true});
+
+  if(error){
+    box.innerHTML=`<div class="warning">Could not load this week: ${esc(error.message)}</div>`;
+    return;
+  }
+
+  const classes=(data||[])
+    .filter(c=>!ctClientClassIsPast(c))
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  // Keep the week we just loaded available to the booking modal.
+  const otherClasses=(db.classes||[]).filter(c=>c.class_date<startDate||c.class_date>endDate||(c.studio_type||'Pilates')!==studioTab);
+  db.classes=[...otherClasses,...classes];
+
+  const grouped={};
+  days.forEach(d=>grouped[dateISO(d)]=[]);
+  classes.forEach(c=>(grouped[c.class_date]??=[]).push(c));
+
+  box.innerHTML=days.map(d=>{
+    const key=dateISO(d);
+    const dayClasses=grouped[key]||[];
+
+    return `
+      <section class="ct-client-day">
+        <div class="ct-client-day-head">
+          <b>${d.toLocaleDateString(undefined,{weekday:'long'})}</b>
+          <span>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+        </div>
+
+        <div class="ct-client-day-classes">
+          ${dayClasses.map(ctClientClassCard).join('') || '<div class="ct-client-no-class">No classes</div>'}
+        </div>
+      </section>`;
+  }).join('');
+}
+
