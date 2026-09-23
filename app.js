@@ -1306,6 +1306,249 @@ function applyMobileDrawerNav(){
   document.head.appendChild(s);
 }
 
+
+// ================= CORE THEORY V9.15 FLEXIBLE RECURRING CLASSES =================
+const CLASS_DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function classRepeatControls(){
+  const start=new Date((document.getElementById('cldate')?.value||today())+'T12:00:00');
+  const startDay=start.getDay();
+  const baseTime=document.getElementById('cltime')?.value||'08:00';
+  return `
+    <div class="full">
+      <label>How should this class be added?</label>
+      <select id="clrepeatmode" onchange="toggleClassRepeatControls()">
+        <option value="single">One class only</option>
+        <option value="weekly">Repeat weekly</option>
+        <option value="days">Choose days & times</option>
+      </select>
+    </div>
+
+    <div id="clweeklycontrols" class="full" style="display:none">
+      <div class="form">
+        <div>
+          <label>Repeat for</label>
+          <select id="clweeklyweeks">
+            <option value="4">4 weeks</option>
+            <option value="8">8 weeks</option>
+            <option value="12">12 weeks</option>
+            <option value="16">16 weeks</option>
+            <option value="24">24 weeks</option>
+          </select>
+        </div>
+        <div>
+          <label>Same day & time</label>
+          <div class="muted" style="padding-top:11px">Every ${CLASS_DAY_NAMES[startDay]} at ${baseTime?formatTime(baseTime):'—'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="cldaycontrols" class="full" style="display:none">
+      <label>Choose the days and time for each class</label>
+      <div class="repeat-day-list">
+        ${[1,2,3,4,5,6,0].map(day=>`
+          <div class="repeat-day-row">
+            <label class="repeat-day-check">
+              <input type="checkbox" class="cldaycheck" data-day="${day}" ${day===startDay?'checked':''} onchange="toggleRepeatDayTime(${day})">
+              <span>${CLASS_DAY_NAMES[day]}</span>
+            </label>
+            <input type="time" id="cldaytime_${day}" value="${baseTime}" ${day===startDay?'':'disabled'}>
+          </div>
+        `).join('')}
+      </div>
+      <div class="form" style="margin-top:12px">
+        <div>
+          <label>Repeat selected days for</label>
+          <select id="cldaysweeks">
+            <option value="1">This week only</option>
+            <option value="4">4 weeks</option>
+            <option value="8">8 weeks</option>
+            <option value="12">12 weeks</option>
+            <option value="16">16 weeks</option>
+          </select>
+        </div>
+        <div>
+          <label>Start from</label>
+          <div class="muted" style="padding-top:11px">${start.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</div>
+        </div>
+      </div>
+      <p class="muted">For the first week, days before the start date are skipped.</p>
+    </div>
+  `;
+}
+
+function toggleClassRepeatControls(){
+  const mode=$("#clrepeatmode")?.value||'single';
+  const weekly=$("#clweeklycontrols"),days=$("#cldaycontrols");
+  if(weekly)weekly.style.display=mode==='weekly'?'block':'none';
+  if(days)days.style.display=mode==='days'?'block':'none';
+}
+
+function toggleRepeatDayTime(day){
+  const cb=document.querySelector(`.cldaycheck[data-day="${day}"]`);
+  const input=document.getElementById(`cldaytime_${day}`);
+  if(input)input.disabled=!cb?.checked;
+}
+
+function syncClassRepeatStart(){
+  const date=$("#cldate")?.value,time=$("#cltime")?.value;
+  const mode=$("#clrepeatmode")?.value;
+  if(mode!=='days')return;
+  const d=new Date((date||today())+'T12:00:00'),day=d.getDay();
+  document.querySelectorAll('.cldaycheck').forEach(cb=>{
+    if(Number(cb.dataset.day)===day){
+      cb.checked=true;
+      const t=document.getElementById(`cldaytime_${day}`);
+      if(t){t.disabled=false;if(time)t.value=time}
+    }
+  });
+}
+
+function classForm(c={}){
+  return `<div class="form">
+    <div><label>Date</label><input type="date" id="cldate" value="${c.class_date||today()}" onchange="syncClassRepeatStart()"></div>
+    <div><label>Time</label><input type="time" id="cltime" value="${(c.class_time||'').slice(0,5)}" onchange="syncClassRepeatStart()"></div>
+    <div><label>Studio</label><select id="clstudio"><option ${c.studio_type==='Pilates'?'selected':''}>Pilates</option><option ${c.studio_type==='Megacore'?'selected':''}>Megacore</option></select></div>
+    <div><label>Level</label><select id="cllevel">${db.class_levels.map(l=>`<option ${c.level===l.name?'selected':''}>${esc(l.name)}</option>`).join('')}</select></div>
+    <div><label>Class name</label><input id="cltype" value="${esc(c.class_type||'')}" placeholder="Rise & Shine"></div>
+    <div><label>Instructor</label><select id="clinstructor">${db.team.filter(t=>t.role==='Instructor'&&t.auth_user_id).map(t=>`<option value="${t.auth_user_id}" data-name="${esc(t.name)}" ${String(c.instructor_user_id||'')===String(t.auth_user_id)?'selected':''}>${esc(t.name)}</option>`).join('')}<option value="" ${!c.instructor_user_id?'selected':''}>Unassigned</option></select></div>
+    <div><label>Capacity</label><input type="number" id="clcap" min="1" value="${c.capacity||10}"></div>
+    ${!c.id?classRepeatControls():''}
+    <div class="full">
+      <button class="btn primary" onclick="${c.id?`saveClass('${c.id}')`:'addClass()'}">${c.id?'Save changes':'Add class'}</button>
+      ${c.id?` <button class="btn danger" onclick="deleteClass('${c.id}')">Delete</button>`:''}
+    </div>
+  </div>`;
+}
+
+function classModal(){
+  modal('Add class',classForm());
+  setTimeout(()=>toggleClassRepeatControls(),0);
+}
+
+function mondayDate(d){
+  const x=new Date(d);
+  const day=(x.getDay()+6)%7;
+  x.setDate(x.getDate()-day);
+  x.setHours(12,0,0,0);
+  return x;
+}
+
+function selectedClassDayRows(base){
+  const weeks=Math.max(1,Number($("#cldaysweeks")?.value||1));
+  const startDate=new Date(base);
+  const firstMonday=mondayDate(startDate);
+  const selections=[...document.querySelectorAll('.cldaycheck:checked')].map(cb=>({
+    day:Number(cb.dataset.day),
+    time:document.getElementById(`cldaytime_${cb.dataset.day}`)?.value
+  })).filter(x=>x.time);
+
+  if(!selections.length)throw new Error('Choose at least one day.');
+
+  const rows=[];
+  const jsDayToMondayOffset=day=>day===0?6:day-1;
+
+  for(let w=0;w<weeks;w++){
+    for(const s of selections){
+      const d=new Date(firstMonday);
+      d.setDate(firstMonday.getDate()+w*7+jsDayToMondayOffset(s.day));
+      if(d<startDate)continue;
+      rows.push({date:dateISO(d),time:s.time});
+    }
+  }
+  return rows;
+}
+
+async function addClass(){
+  const date=$("#cldate")?.value,time=$("#cltime")?.value,name=$("#cltype")?.value.trim();
+  if(!date||!time||!name)return alert('Date, time and class name are required.');
+
+  const mode=$("#clrepeatmode")?.value||'single';
+  const base=new Date(date+'T12:00:00');
+  const group=crypto.randomUUID();
+  let instances=[];
+
+  try{
+    if(mode==='single'){
+      instances=[{date,time}];
+    }else if(mode==='weekly'){
+      const weeks=Math.max(1,Number($("#clweeklyweeks")?.value||4));
+      for(let i=0;i<weeks;i++){
+        const d=new Date(base);
+        d.setDate(base.getDate()+7*i);
+        instances.push({date:dateISO(d),time});
+      }
+    }else{
+      instances=selectedClassDayRows(base);
+    }
+  }catch(e){
+    return alert(e.message);
+  }
+
+  const instructor=$("#clinstructor");
+  const common={
+    class_type:name,
+    instructor:instructor.selectedOptions[0]?.dataset.name||'',
+    instructor_user_id:instructor.value||null,
+    capacity:+$("#clcap").value||10,
+    studio_type:$("#clstudio").value,
+    level:$("#cllevel").value,
+    recurring_group:instances.length>1?group:null
+  };
+
+  const rows=instances.map(x=>({...common,class_date:x.date,class_time:x.time}));
+
+  // Prevent accidental duplicate entries that already exist at the exact same studio/date/time.
+  const conflicts=rows.filter(r=>db.classes.some(c=>
+    !c.cancelled &&
+    c.class_date===r.class_date &&
+    String(c.class_time||'').slice(0,5)===String(r.class_time).slice(0,5) &&
+    (c.studio_type||'Pilates')===r.studio_type
+  ));
+  if(conflicts.length){
+    const sample=conflicts.slice(0,3).map(r=>`${r.class_date} ${formatTime(String(r.class_time).slice(0,5))}`).join(', ');
+    if(!confirm(`${conflicts.length} selected time slot${conflicts.length===1?' already has':'s already have'} a ${common.studio_type} class (${sample}${conflicts.length>3?'…':''}). Add anyway?`))return;
+  }
+
+  const {error}=await sb.from('classes').insert(rows);
+  if(error)return alert(error.message);
+
+  $("#modal").remove();
+  await loadAll();
+  alert(rows.length===1?'Class added.':`${rows.length} classes added.`);
+}
+
+function applyRecurringClassStyles(){
+  if(document.getElementById('coreTheoryRecurringClassStyles'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryRecurringClassStyles';
+  s.textContent=`
+    .repeat-day-list{display:grid;gap:8px;margin-top:8px}
+    .repeat-day-row{
+      display:grid;
+      grid-template-columns:minmax(120px,1fr) 130px;
+      gap:10px;
+      align-items:center;
+      padding:8px 10px;
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:10px;
+      background:rgba(255,255,255,.55);
+    }
+    .repeat-day-check{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin:0;
+      font-weight:600;
+    }
+    .repeat-day-check input{width:auto}
+    @media(max-width:520px){
+      .repeat-day-row{grid-template-columns:1fr 118px}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
@@ -1342,4 +1585,5 @@ applyPackageClarityStyle();
 applyPackageFlowStyle();
 applyPWAStyles();
 applyMobileDrawerNav();
+applyRecurringClassStyles();
 init();
