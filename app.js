@@ -4910,3 +4910,146 @@ function schedule(){
   `${studioTab} weekly timetable — same times stay on the same row`);
 }
 
+
+
+// ================= CORE THEORY — LOAD MORE THAN 1000 ROWS =================
+// Supabase/PostgREST commonly returns at most 1000 rows per select request.
+// Fetch tables in pages so long schedules are not cut off.
+
+async function ctFetchAllRows(table, pageSize=1000){
+  let all=[];
+  let from=0;
+
+  while(true){
+    const to=from+pageSize-1;
+    const {data,error}=await sb.from(table).select("*").range(from,to);
+
+    if(error)return {data:null,error};
+
+    const rows=data||[];
+    all.push(...rows);
+
+    if(rows.length<pageSize)break;
+    from+=pageSize;
+  }
+
+  return {data:all,error:null};
+}
+
+async function loadAll(){
+  if(!session)return authScreen();
+
+  $("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';
+
+  let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();
+  if(pr.error)return authScreen("Profile error: "+pr.error.message);
+
+  profile=pr.data;
+  if(!profile)return authScreen("This account does not have a Core Theory profile yet.");
+
+  if(isClient()){
+    await sb.rpc("ensure_client_record");
+    await sb.rpc("issue_my_birthday_reward");
+  }
+
+  if(isOwner()){
+    await sb.rpc('process_today_birthdays');
+  }
+
+  const tables=isOwner()
+    ?[
+      'clients','memberships','products','sales','expenses','classes','team','bookings',
+      'class_levels','package_orders','notification_settings','notification_queue',
+      'studio_settings','announcements','promo_codes','custom_sections','custom_entries',
+      'audit_log','instructor_availability','instructor_class_slots','client_packages',
+      'class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings',
+      'client_notes','package_freezes','payroll_adjustments','client_notifications'
+    ]
+    :isInstructor()
+      ?['classes','bookings','class_levels','announcements','studio_events','client_notes']
+      :isReceptionist()
+        ?[]
+        :[
+          'clients','memberships','classes','bookings','class_levels','package_orders',
+          'announcements','client_packages','client_rewards','studio_events','client_notifications'
+        ];
+
+  db={
+    clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],
+    class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],
+    studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],
+    audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],
+    client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],
+    guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],
+    client_notifications:[],roster:[],guestRoster:[]
+  };
+
+  // IMPORTANT: paginated fetch instead of a single .select("*")
+  const rs=await Promise.all(tables.map(t=>ctFetchAllRows(t)));
+
+  const bad=rs.find(x=>x.error);
+  if(bad)return authScreen("Database error: "+bad.error.message);
+
+  tables.forEach((t,i)=>db[t]=rs[i].data||[]);
+
+  if(isClient()){
+    const cp=await sb.rpc('client_payment_history');
+    if(!cp.error)db.client_payments=cp.data||[];
+  }
+
+  if(isInstructor()){
+    const [rr,mc,gr]=await Promise.all([
+      sb.rpc('my_instructor_roster'),
+      sb.rpc('my_instructor_classes_v2'),
+      sb.rpc('my_instructor_guest_roster')
+    ]);
+
+    if(rr.error)return authScreen('Schedule access error: '+rr.error.message);
+    if(mc.error)return authScreen('Schedule access error: '+mc.error.message);
+
+    db.roster=rr.data||[];
+    db.classes=mc.data||[];
+    db.guestRoster=gr.error?[]:(gr.data||[]);
+  }
+
+  if(isClient()||isInstructor()){
+    const subs=await sb.rpc('visible_active_class_substitutions');
+    if(!subs.error)db.class_substitutions=subs.data||[];
+  }
+
+  if(isFrontDeskStaff()){
+    const fd=await sb.rpc('is_front_desk_on_duty');
+    db.frontDeskDuty=fd.data===true;
+
+    if(db.frontDeskDuty){
+      const [fr,fm,fp,fc]=await Promise.all([
+        sb.rpc('front_desk_today'),
+        sb.rpc('front_desk_memberships_v2'),
+        sb.rpc('front_desk_products'),
+        sb.rpc('front_desk_booking_classes',{p_days:14})
+      ]);
+
+      if(!fr.error)db.frontDeskToday=fr.data||[];
+      if(!fm.error)db.frontDeskMemberships=fm.data||[];
+      if(!fp.error)db.frontDeskProducts=fp.data||[];
+      if(!fc.error)db.frontDeskBookingClasses=fc.data||[];
+    }
+  }
+
+  if(isInstructor()){
+    const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];
+    if(!allowed.includes(page))page='instructorhome';
+  }
+
+  if(isReceptionist()){
+    const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];
+    if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';
+  }
+
+  if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page)){
+    page='clienthome';
+  }
+
+  render();
+}
+
