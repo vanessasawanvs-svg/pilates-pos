@@ -3848,3 +3848,124 @@ async function savePastedSchedule(){
 }
 
 
+// ================= CORE THEORY — CANCEL REPEATED CLASS SERIES =================
+
+function ctSameRecurringSlot(base, other){
+  if(!base || !other || !base.recurring_group || !other.recurring_group)return false;
+  if(String(base.recurring_group)!==String(other.recurring_group))return false;
+
+  const baseDay=new Date(`${base.class_date}T12:00:00`).getDay();
+  const otherDay=new Date(`${other.class_date}T12:00:00`).getDay();
+
+  return (
+    baseDay===otherDay &&
+    String(base.class_time||'').slice(0,5)===String(other.class_time||'').slice(0,5) &&
+    String(base.studio_type||'Pilates')===String(other.studio_type||'Pilates') &&
+    String(base.class_type||'').trim().toLowerCase()===String(other.class_type||'').trim().toLowerCase()
+  );
+}
+
+function deleteClass(id){
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  if(!c.recurring_group){
+    return ctCancelOneClass(id);
+  }
+
+  const futureSeries=(db.classes||[])
+    .filter(x=>
+      !x.cancelled &&
+      ctSameRecurringSlot(c,x) &&
+      String(x.class_date)>=String(c.class_date)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(futureSeries.length<=1){
+    return ctCancelOneClass(id);
+  }
+
+  modal('Cancel repeated class',`
+    <div class="card">
+      <h3>${esc(c.class_type||'Class')}</h3>
+      <p>
+        ${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+        · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+        · ${esc(c.studio_type||'Pilates')}
+      </p>
+      <p class="muted">
+        This class repeats weekly. Choose whether to cancel only this date or this class on all future weeks.
+      </p>
+    </div>
+
+    <div style="display:grid;gap:10px;margin-top:14px">
+      <button class="btn" onclick="ctCancelOneClass('${c.id}')">
+        Cancel this class only
+      </button>
+
+      <button class="btn danger" onclick="ctCancelFutureSeries('${c.id}')">
+        Cancel this + ${futureSeries.length-1} future week${futureSeries.length-1===1?'':'s'}
+      </button>
+
+      <button class="btn" onclick="$('#modal').remove()">Keep class</button>
+    </div>
+  `);
+}
+
+async function ctCancelOneClass(id){
+  if(!confirm('Cancel only this class? Existing bookings will be cancelled safely.'))return;
+
+  const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(id)});
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert('This class was cancelled.');
+}
+
+async function ctCancelFutureSeries(id){
+  const base=db.classes.find(x=>String(x.id)===String(id));
+  if(!base)return;
+
+  const series=(db.classes||[])
+    .filter(x=>
+      !x.cancelled &&
+      ctSameRecurringSlot(base,x) &&
+      String(x.class_date)>=String(base.class_date)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(!series.length)return alert('No future repeated classes found.');
+
+  const ok=confirm(
+    `Cancel ${series.length} ${base.class_type||'class'} session${series.length===1?'':'s'} from ${base.class_date} onward?\n\n`+
+    `Any existing bookings on those classes will be cancelled safely.`
+  );
+  if(!ok)return;
+
+  const btn=document.querySelector('#modal .btn.danger');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Cancelling…';
+  }
+
+  let cancelled=0;
+
+  for(const c of series){
+    const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(c.id)});
+    if(error){
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='Try again';
+      }
+      await loadAll();
+      return alert(`${cancelled} classes were cancelled, then Core Theory stopped because of an error:\n${error.message}`);
+    }
+    cancelled++;
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert(`${cancelled} repeated classes were cancelled.`);
+}
+
