@@ -4,7 +4,7 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=s=>document.querySelector(s), money=n=>`$${Number(n||0).toFixed(2)}`, today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
 const esc=(s="")=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 let db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[]};
-let session=null,profile=null,page="dashboard",cart=[],scheduleWeekOffset=0,studioTab="Pilates",selectedSaleClient=null,posPackageTab="Pilates";
+let session=null,profile=null,page="dashboard",cart=[],scheduleWeekOffset=0,studioTab="Pilates",selectedSaleClient=null,posPackageTab="Pilates",posPromo=null;
 const isOwner=()=>profile?.role==="owner",isInstructor=()=>profile?.role==="instructor",isReceptionist=()=>profile?.role==="receptionist",isClient=()=>profile?.role==="client",isStaff=()=>isOwner()||isInstructor(),isFrontDeskStaff=()=>isInstructor()||isReceptionist();
 const sortedMemberships=(arr=db.memberships)=>[...(arr||[])].filter(x=>!x.archived_at).sort((a,b)=>(Number(a.sort_order||0)-Number(b.sort_order||0))||String(a.name||'').localeCompare(String(b.name||'')));
 const PHONE_COUNTRIES=[['Lebanon','+961'],['France','+33'],['United Arab Emirates','+971'],['Kuwait','+965'],['Saudi Arabia','+966'],['Qatar','+974'],['Bahrain','+973'],['Jordan','+962'],['Egypt','+20'],['Cyprus','+357'],['Greece','+30'],['Italy','+39'],['Spain','+34'],['Portugal','+351'],['Germany','+49'],['United Kingdom','+44'],['Ireland','+353'],['Switzerland','+41'],['Belgium','+32'],['Netherlands','+31'],['Sweden','+46'],['Norway','+47'],['Denmark','+45'],['Austria','+43'],['United States / Canada','+1'],['Australia','+61'],['New Zealand','+64'],['Turkey','+90'],['Armenia','+374'],['Georgia','+995'],['Iraq','+964'],['Oman','+968'],['Morocco','+212'],['Tunisia','+216'],['Algeria','+213'],['South Africa','+27'],['India','+91'],['Philippines','+63'],['Other','']];
@@ -100,9 +100,206 @@ function saleClientSearchHtml(){return `<label>Client</label><div><input id="sal
 async function searchSaleClients(q){const box=$("#saleClientResults");if(!box)return;const term=String(q||'').trim();if(term.length<2){box.innerHTML='';return}let rows=[];if(isOwner()){rows=db.clients.filter(c=>String(c.name||'').toLowerCase().includes(term.toLowerCase())).slice(0,8).map(c=>({id:String(c.id),name:c.name}))}else if(isFrontDeskStaff()&&db.frontDeskDuty){const {data,error}=await sb.rpc('front_desk_client_search',{p_query:term});if(error){box.innerHTML=`<div class="warning">${esc(error.message)}</div>`;return}rows=data||[]}box.innerHTML=rows.length?rows.map(c=>`<button type="button" class="btn small full" style="text-align:left;margin-top:6px" onclick="chooseSaleClient('${c.id}',decodeURIComponent('${encodeURIComponent(c.name||'')}'))">${esc(c.name)}</button>`).join(''):'<div class="muted" style="padding:8px 0">No matching client.</div>'}
 function chooseSaleClient(id,name){selectedSaleClient={id:String(id),name:String(name)};const input=$("#saleClientSearch");if(input)input.value=selectedSaleClient.name;const box=$("#saleClientResults");if(box)box.innerHTML='';const chosen=$("#saleClientChosen");if(chosen)chosen.innerHTML=`Selected: <b>${esc(selectedSaleClient.name)}</b>`}
 
-function pos(){if(!(isOwner()||(isFrontDeskStaff()&&db.frontDeskDuty)))return account();const memberships=sortedMemberships(isOwner()?db.memberships:(db.frontDeskMemberships||[])),products=isOwner()?db.products:(db.frontDeskProducts||[]),packageItems=memberships.filter(x=>(x.studio_scope||'Both')===posPackageTab);layout(`<div class="pos"><div class="card"><h3>Packages</h3><div class="schedule-tabs" style="margin-bottom:14px"><button class="tab ${posPackageTab==='Pilates'?'active':''}" onclick="posPackageTab='Pilates';pos()">PILATES</button><button class="tab ${posPackageTab==='Megacore'?'active':''}" onclick="posPackageTab='Megacore';pos()">MEGACORE</button><button class="tab ${posPackageTab==='Both'?'active':''}" onclick="posPackageTab='Both';pos()">BOTH</button></div><div class="product-grid">${packageItems.map(x=>`<div class="product" onclick="addCart('membership','${x.id}')"><b>${esc(x.name)}</b><small>${x.is_private?'Private Session':(x.sessions===999?'Unlimited':x.sessions+' sessions')}</small><div>${money(x.price)}</div></div>`).join('')||`<div class="empty">No ${esc(posPackageTab)} memberships yet.</div>`}</div><div class="spacer"></div><h3>Retail Products</h3><div class="product-grid">${products.map(x=>`<div class="product" onclick="addCart('product','${x.id}')"><b>${esc(x.name)}</b><small>${x.stock??0} in stock</small><div>${money(x.price)}</div></div>`).join('')||'<div class="empty">No retail products yet.</div>'}</div></div><div class="card"><h3>Current sale</h3>${cart.map((x,i)=>`<div class="cart-row"><span>${esc(x.name)}</span><span>${money(x.price)} <button class="btn small" onclick="cart.splice(${i},1);pos()">×</button></span></div>`).join('')||'<div class="empty">Add an item.</div>'}${saleClientSearchHtml()}<label>Payment</label><select id="payment"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select><h2>${money(cart.reduce((a,x)=>a+Number(x.price),0))}</h2><button class="btn primary full" onclick="checkout()">Complete sale</button></div></div>`,`POS / Sales`,isOwner()?'Packages are grouped by Pilates, Megacore and Both':'Front Desk Duty — packages grouped by studio type')}
-function addCart(kind,id){const src=kind==='product'?(isOwner()?db.products:(db.frontDeskProducts||[])):(isOwner()?db.memberships:(db.frontDeskMemberships||[])),x=src.find(a=>String(a.id)===String(id));if(!x)return alert('Item not found. Refresh and try again.');cart.push({...x,kind});pos()}
-async function checkout(){if(!cart.length)return;const cid=selectedSaleClient?.id||null,method=$("#payment").value;if(cart.some(x=>x.kind==='membership')&&!cid)return alert('Search and select a client before selling a package.');const btn=document.querySelector('.pos .btn.primary.full');if(btn){btn.disabled=true;btn.textContent='Processing…'}const items=cart.map(x=>({id:String(x.id),name:x.name,price:Number(x.price||0),kind:x.kind}));const {error}=await sb.rpc('complete_pos_sale',{p_client_id:cid,p_payment_method:method,p_items:items});if(error){if(btn){btn.disabled=false;btn.textContent='Complete sale'}return alert(error.message)}cart=[];selectedSaleClient=null;await loadAll();alert('Sale recorded.')}
+function pos(){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const memberships=isOwner()?db.memberships:(db.frontDeskMemberships||[]);
+  const packageItems=memberships.filter(x=>(x.studio_scope||'Both')===posPackageTab);
+  const subtotal=cart.reduce((a,x)=>a+Number(x.price||0),0);
+  const discount=Number(posPromo?.discount||0);
+  const total=Math.max(0,subtotal-discount);
+
+  layout(`<div class="pos">
+    <div class="card">
+      <h3>Packages</h3>
+      <div class="schedule-tabs" style="margin-bottom:14px">
+        <button class="tab ${posPackageTab==='Pilates'?'active':''}" onclick="posPackageTab='Pilates';pos()">PILATES</button>
+        <button class="tab ${posPackageTab==='Megacore'?'active':''}" onclick="posPackageTab='Megacore';pos()">MEGACORE</button>
+        <button class="tab ${posPackageTab==='Both'?'active':''}" onclick="posPackageTab='Both';pos()">MIX</button>
+      </div>
+      <div class="product-grid">
+        ${packageItems.map(x=>`<div class="product" onclick="addCart('membership','${x.id}')">
+          <b>${esc(x.name)}</b>
+          <small>${x.is_private?'Private Session':(x.sessions===999?'Unlimited':x.sessions+' sessions')}</small>
+          <div>${money(x.price)}</div>
+        </div>`).join('')||`<div class="empty">No ${esc(posPackageTab==='Both'?'Mix':posPackageTab)} memberships yet.</div>`}
+      </div>
+
+      <div class="spacer"></div>
+      <h3>Retail Products</h3>
+      <div class="product-grid">
+        ${products.map(x=>`<div class="product" onclick="addCart('product','${x.id}')">
+          <b>${esc(x.name)}</b><small>${x.stock??0} in stock</small><div>${money(x.price)}</div>
+        </div>`).join('')||'<div class="empty">No retail products yet.</div>'}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Current sale</h3>
+
+      ${cart.map((x,i)=>`<div class="cart-row">
+        <span>${esc(x.name)}</span>
+        <span>${money(x.price)} <button class="btn small" onclick="removeCartItem(${i})">×</button></span>
+      </div>`).join('')||'<div class="empty">Add an item.</div>'}
+
+      ${saleClientSearchHtml()}
+
+      <label>Payment</label>
+      <select id="payment">
+        <option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option>
+      </select>
+
+      <div class="pos-promo-box">
+        <label>Promo code</label>
+        <div class="pos-promo-row">
+          <input id="posPromoCode" placeholder="Enter promo code" value="${esc(posPromo?.code||'')}" oninput="this.value=this.value.toUpperCase()">
+          ${posPromo
+            ? `<button class="btn" type="button" onclick="removePosPromo()">Remove</button>`
+            : `<button class="btn" type="button" onclick="applyPosPromo()">Apply</button>`}
+        </div>
+        ${posPromo
+          ? `<div class="promo-success">✓ ${esc(posPromo.code)} applied · You save ${money(posPromo.discount)}</div>`
+          : `<div class="muted">Promo codes apply to package purchases. Select the client and package first.</div>`}
+      </div>
+
+      ${posPromo?`
+        <div class="pos-total-lines">
+          <div><span>Subtotal</span><b>${money(subtotal)}</b></div>
+          <div class="promo-discount"><span>Promo · ${esc(posPromo.code)}</span><b>−${money(discount)}</b></div>
+        </div>`:''}
+
+      <div class="pos-grand-total">
+        <span>Total</span>
+        <h2>${money(total)}</h2>
+      </div>
+
+      <button class="btn primary full" onclick="checkout()">Complete sale</button>
+    </div>
+  </div>`,`POS / Sales`,isOwner()?'Packages are grouped by Pilates, Megacore and Mix':'Front Desk Duty — packages grouped by studio type');
+}
+
+function removeCartItem(i){
+  cart.splice(i,1);
+  posPromo=null;
+  pos();
+}
+
+function addCart(kind,id){
+  const src=kind==='product'?(isOwner()?db.products:(db.frontDeskProducts||[])):(isOwner()?db.memberships:(db.frontDeskMemberships||[]));
+  const x=src.find(a=>String(a.id)===String(id));
+  if(!x)return alert('Item not found. Refresh and try again.');
+  cart.push({...x,kind});
+  posPromo=null;
+  pos();
+}
+
+async function applyPosPromo(){
+  const code=($("#posPromoCode")?.value||'').trim().toUpperCase();
+  if(!code)return alert('Enter a promo code first.');
+  if(!selectedSaleClient?.id)return alert('Select the client before applying a promo code.');
+
+  const packages=cart.filter(x=>x.kind==='membership');
+  if(!packages.length)return alert('Add a package before applying a promo code.');
+  if(packages.length>1)return alert('A promo code can be applied to one package at a time. Complete this package sale first, then start the next one.');
+
+  const btn=document.querySelector('.pos-promo-row .btn');
+  if(btn){btn.disabled=true;btn.textContent='Checking…'}
+
+  const {data,error}=await sb.rpc('preview_pos_promo',{
+    p_client_id:String(selectedSaleClient.id),
+    p_membership_id:String(packages[0].id),
+    p_coupon_code:code
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Apply'}
+    return alert(error.message);
+  }
+
+  posPromo={
+    code:data?.code||code,
+    discount:Number(data?.discount||0),
+    final_amount:Number(data?.final_amount||packages[0].price||0),
+    promo_id:data?.promo_id||null
+  };
+  pos();
+}
+
+function removePosPromo(){
+  posPromo=null;
+  pos();
+}
+
+async function checkout(){
+  if(!cart.length)return;
+
+  const cid=selectedSaleClient?.id||null;
+  const method=$("#payment").value;
+
+  if(cart.some(x=>x.kind==='membership')&&!cid)
+    return alert('Search and select a client before selling a package.');
+
+  if(posPromo){
+    const packages=cart.filter(x=>x.kind==='membership');
+    if(packages.length!==1)
+      return alert('A promo code can be applied to one package at a time.');
+
+    const btn=document.querySelector('.pos .btn.primary.full');
+    if(btn){btn.disabled=true;btn.textContent='Processing…'}
+
+    const items=cart.map(x=>({
+      id:String(x.id),
+      name:x.name,
+      price:Number(x.price||0),
+      kind:x.kind
+    }));
+
+    const {error}=await sb.rpc('complete_pos_sale_with_promo',{
+      p_client_id:String(cid),
+      p_payment_method:method,
+      p_items:items,
+      p_coupon_code:String(posPromo.code)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Complete sale'}
+      return alert(error.message);
+    }
+
+    cart=[];
+    selectedSaleClient=null;
+    posPromo=null;
+    await loadAll();
+    alert('Sale recorded with promo code.');
+    return;
+  }
+
+  const btn=document.querySelector('.pos .btn.primary.full');
+  if(btn){btn.disabled=true;btn.textContent='Processing…'}
+
+  const items=cart.map(x=>({
+    id:String(x.id),
+    name:x.name,
+    price:Number(x.price||0),
+    kind:x.kind
+  }));
+
+  const {error}=await sb.rpc('complete_pos_sale',{
+    p_client_id:cid,
+    p_payment_method:method,
+    p_items:items
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Complete sale'}
+    return alert(error.message);
+  }
+
+  cart=[];
+  selectedSaleClient=null;
+  posPromo=null;
+  await loadAll();
+  alert('Sale recorded.');
+}
 
 async function applyMembership(cid,m){const d=new Date();d.setDate(d.getDate()+Number(m.validity_days));return sb.from('clients').update({package:m.name,sessions:m.sessions,expiry:dateISO(d)}).eq('id',cid)}function sellMembership(cid){modal('Add package',`<select id="smid">${db.memberships.map(m=>`<option value="${m.id}">${esc(m.name)} — ${money(m.price)}</option>`).join('')}</select><button class="btn primary full" onclick="confirmMembership('${cid}')">Apply package</button>`)}async function confirmMembership(cid){const m=db.memberships.find(x=>String(x.id)===$("#smid").value);if(!m)return;const {error}=await sb.rpc('owner_apply_membership',{p_client_id:String(cid),p_membership_id:String(m.id)});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Package applied.')}
 function inventory(){layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="productModal()">+ Add product</button></div><table><thead><tr><th>Product</th><th>Cost</th><th>Sell</th><th>Stock</th><th>Low stock</th><th></th></tr></thead><tbody>${db.products.map(p=>`<tr><td><b>${esc(p.name)}</b><div class="muted">${esc(p.category||'')}</div></td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${p.stock}</td><td>${p.minimum_stock??0}</td><td><button class="btn small" onclick="editProduct('${p.id}')">Edit</button> <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button></td></tr>`).join('')}</tbody></table></div>`,`Inventory`,`Retail stock — edit products, cost, price and quantities`)}
@@ -1549,6 +1746,65 @@ function applyRecurringClassStyles(){
   document.head.appendChild(s);
 }
 
+
+function applyPosPromoStyles(){
+  if(document.getElementById('coreTheoryPosPromoStyles'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryPosPromoStyles';
+  s.textContent=`
+    .pos-promo-box{
+      margin-top:16px;
+      padding-top:14px;
+      border-top:1px solid rgba(0,0,0,.08);
+    }
+    .pos-promo-row{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:8px;
+      align-items:center;
+    }
+    .pos-promo-row input{
+      text-transform:uppercase;
+    }
+    .promo-success{
+      margin-top:8px;
+      padding:9px 11px;
+      border-radius:9px;
+      background:rgba(114,47,55,.08);
+      color:#722F37;
+      font-weight:600;
+      font-size:13px;
+    }
+    .pos-total-lines{
+      margin-top:16px;
+      padding-top:12px;
+      border-top:1px solid rgba(0,0,0,.08);
+      display:grid;
+      gap:7px;
+    }
+    .pos-total-lines>div,.pos-grand-total{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+    .promo-discount{
+      color:#722F37;
+    }
+    .pos-grand-total{
+      margin:8px 0 14px;
+    }
+    .pos-grand-total h2{
+      margin:0;
+    }
+    @media(max-width:520px){
+      .pos-promo-row{grid-template-columns:1fr}
+      .pos-promo-row .btn{width:100%}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 function applyMobileButtonColorFix(){
   if(document.getElementById('coreTheoryMobileColorFix'))return;
   const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
@@ -1586,4 +1842,5 @@ applyPackageFlowStyle();
 applyPWAStyles();
 applyMobileDrawerNav();
 applyRecurringClassStyles();
+applyPosPromoStyles();
 init();
