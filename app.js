@@ -3,7 +3,7 @@ const SUPABASE_KEY="sb_publishable_0dVqqdCdDrFgqRfh7E1DvQ_uhJvj1Bh";
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=s=>document.querySelector(s), money=n=>`$${Number(n||0).toFixed(2)}`, today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
 const esc=(s="")=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
-let db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_shifts:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[]};
+let db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[]};
 let session=null,profile=null,page="dashboard",cart=[],scheduleWeekOffset=0,studioTab="Pilates",selectedSaleClient=null,posPackageTab="Pilates",posPromo=null;
 const isOwner=()=>profile?.role==="owner",isInstructor=()=>profile?.role==="instructor",isReceptionist=()=>profile?.role==="receptionist",isClient=()=>profile?.role==="client",isStaff=()=>isOwner()||isInstructor(),isFrontDeskStaff=()=>isInstructor()||isReceptionist();
 const sortedMemberships=(arr=db.memberships)=>[...(arr||[])].filter(x=>!x.archived_at).sort((a,b)=>(Number(a.sort_order||0)-Number(b.sort_order||0))||String(a.name||'').localeCompare(String(b.name||'')));
@@ -21,10 +21,7 @@ async function savePassword(e){e.preventDefault();if($("#pw1").value!==$("#pw2")
 async function logout(){await sb.auth.signOut();session=null;profile=null;authScreen()}
 
 async function loadAll(){
-  try{
-    const {data:shiftData}=await sb.from('instructor_shifts').select('*');
-    db.instructor_shifts=shiftData||[];
-  }catch(e){db.instructor_shifts=[]}if(!session)return authScreen();$("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(pr.error)return authScreen("Profile error: "+pr.error.message);profile=pr.data;if(!profile)return authScreen("This account does not have a Core Theory profile yet.");if(isClient()){await sb.rpc("ensure_client_record");await sb.rpc("issue_my_birthday_reward");}if(isOwner()){await sb.rpc('process_today_birthdays');}const tables=isOwner()?['clients','memberships','products','sales','expenses','classes','team','bookings','class_levels','package_orders','notification_settings','notification_queue','studio_settings','announcements','promo_codes','custom_sections','custom_entries','audit_log','instructor_availability','client_packages','class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings','client_notes','package_freezes','payroll_adjustments','client_notifications']:isInstructor()?['classes','bookings','class_levels','announcements','studio_events','client_notes']:isReceptionist()?[]:['clients','memberships','classes','bookings','class_levels','package_orders','announcements','client_packages','client_rewards','studio_events','client_notifications'];db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_shifts:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[],roster:[],guestRoster:[]};const rs=await Promise.all(tables.map(t=>sb.from(t).select("*")));const bad=rs.find(x=>x.error);if(bad)return authScreen("Database error: "+bad.error.message);tables.forEach((t,i)=>db[t]=rs[i].data||[]);if(isClient()){const cp=await sb.rpc('client_payment_history');if(!cp.error)db.client_payments=cp.data||[]}if(isInstructor()){const [rr,mc,gr]=await Promise.all([sb.rpc('my_instructor_roster'),sb.rpc('my_instructor_classes'),sb.rpc('my_instructor_guest_roster')]);if(rr.error)return authScreen('Schedule access error: '+rr.error.message);if(mc.error)return authScreen('Schedule access error: '+mc.error.message);db.roster=rr.data||[];db.classes=mc.data||[];db.guestRoster=gr.error?[]:(gr.data||[]);}if(isFrontDeskStaff()){const fd=await sb.rpc('is_front_desk_on_duty');db.frontDeskDuty=fd.data===true;if(db.frontDeskDuty){const [fr,fm,fp,fc]=await Promise.all([sb.rpc('front_desk_today'),sb.rpc('front_desk_memberships_v2'),sb.rpc('front_desk_products'),sb.rpc('front_desk_booking_classes',{p_days:14})]);if(!fr.error)db.frontDeskToday=fr.data||[];if(!fm.error)db.frontDeskMemberships=fm.data||[];if(!fp.error)db.frontDeskProducts=fp.data||[];if(!fc.error)db.frontDeskBookingClasses=fc.data||[];}}if(isInstructor()){const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page='instructorhome';}if(isReceptionist()){const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';}if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page))page='clienthome';render()}
+if(!session)return authScreen();$("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(pr.error)return authScreen("Profile error: "+pr.error.message);profile=pr.data;if(!profile)return authScreen("This account does not have a Core Theory profile yet.");if(isClient()){await sb.rpc("ensure_client_record");await sb.rpc("issue_my_birthday_reward");}if(isOwner()){await sb.rpc('process_today_birthdays');}const tables=isOwner()?['clients','memberships','products','sales','expenses','classes','team','bookings','class_levels','package_orders','notification_settings','notification_queue','studio_settings','announcements','promo_codes','custom_sections','custom_entries','audit_log','instructor_availability','instructor_class_slots','client_packages','class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings','client_notes','package_freezes','payroll_adjustments','client_notifications']:isInstructor()?['classes','bookings','class_levels','announcements','studio_events','client_notes']:isReceptionist()?[]:['clients','memberships','classes','bookings','class_levels','package_orders','announcements','client_packages','client_rewards','studio_events','client_notifications'];db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[],roster:[],guestRoster:[]};const rs=await Promise.all(tables.map(t=>sb.from(t).select("*")));const bad=rs.find(x=>x.error);if(bad)return authScreen("Database error: "+bad.error.message);tables.forEach((t,i)=>db[t]=rs[i].data||[]);if(isClient()){const cp=await sb.rpc('client_payment_history');if(!cp.error)db.client_payments=cp.data||[]}if(isInstructor()){const [rr,mc,gr]=await Promise.all([sb.rpc('my_instructor_roster'),sb.rpc('my_instructor_classes'),sb.rpc('my_instructor_guest_roster')]);if(rr.error)return authScreen('Schedule access error: '+rr.error.message);if(mc.error)return authScreen('Schedule access error: '+mc.error.message);db.roster=rr.data||[];db.classes=mc.data||[];db.guestRoster=gr.error?[]:(gr.data||[]);}if(isFrontDeskStaff()){const fd=await sb.rpc('is_front_desk_on_duty');db.frontDeskDuty=fd.data===true;if(db.frontDeskDuty){const [fr,fm,fp,fc]=await Promise.all([sb.rpc('front_desk_today'),sb.rpc('front_desk_memberships_v2'),sb.rpc('front_desk_products'),sb.rpc('front_desk_booking_classes',{p_days:14})]);if(!fr.error)db.frontDeskToday=fr.data||[];if(!fm.error)db.frontDeskMemberships=fm.data||[];if(!fp.error)db.frontDeskProducts=fp.data||[];if(!fc.error)db.frontDeskBookingClasses=fc.data||[];}}if(isInstructor()){const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page='instructorhome';}if(isReceptionist()){const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';}if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page))page='clienthome';render()}
 function nav(){const pages=isOwner()?['dashboard','clients','schedule','pos','memberships','inventory','expenses','finance','team','operations','settings']:isInstructor()?['instructorhome','schedule',...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:isReceptionist()?[...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:['clienthome','book','mybookings','packages','clientaccount'];const labels={dashboard:'⌂ Dashboard',instructorhome:'⌂ Home',clienthome:'⌂ Home',clients:'◎ Clients',schedule:'□ Schedule',pos:'$ POS / Sales',memberships:'◇ Memberships',inventory:'▣ Inventory',expenses:'− Expenses',finance:'↗ Finance',team:'◌ Team',operations:'✦ Operations',settings:'⚙ Settings',payment:'$ Record Payment',frontdesk:'$ Front Desk',account:'⚙ Account',book:'□ Book a Class',mybookings:'✓ My Bookings',packages:'◇ Packages',clientaccount:'◎ My Account'};return pages.map(x=>`<button data-page="${x}" class="${page===x?'active':''}">${labels[x]}</button>`).join('')+(isOwner()?db.custom_sections.filter(x=>x.visible_owner!==false).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(x=>`<button data-custom="${x.id}" class="${page==='custom:'+x.id?'active':''}">${esc(x.icon||'•')} ${esc(x.name)}</button>`).join(''):'')}
 function activeAnnouncementBanners(){const target=isClient()?'Clients':(isInstructor()||isReceptionist())?'Instructors':'Everyone';return (db.announcements||[]).filter(a=>a.active!==false&&(isOwner()||a.audience==='Everyone'||a.audience===target)).map(a=>`<div class="notice card" style="margin-bottom:12px"><b>${esc(a.title)}</b><p>${esc(a.message)}</p></div>`).join('')}
 function layout(content,title,subtitle=''){const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';$("#app").innerHTML=`<div class="app"><aside class="sidebar"><div class="brand">CORE THEORY<small>${role} Portal</small></div><div class="nav">${nav()}</div><div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div><button class="btn logout" onclick="logout()">Log out</button></aside><main class="main"><div class="topbar"><div><h1>${title}</h1><p>${subtitle}</p><div class="sync-note">☁ Cloud connected</div></div><button class="btn" onclick="loadAll()">Refresh</button></div>${activeAnnouncementBanners()}${content}</main></div>`;document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{page='custom:'+b.dataset.custom;render()})}
@@ -2074,3 +2071,218 @@ applyRecurringClassStyles();
 applyPosPromoStyles();
 applyInstructorShiftStyles();
 init();
+
+
+// ================= CORE THEORY — EXACT INSTRUCTOR CLASS HOURS FIX =================
+const CT_SLOT_DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function ctInstructorSlotSummary(t){
+  const slots=(db.instructor_class_slots||[])
+    .filter(s=>String(s.team_id)===String(t.id))
+    .sort((a,b)=>(Number(a.weekday)-Number(b.weekday))||String(a.class_time).localeCompare(String(b.class_time)));
+
+  if(!slots.length)return '<span class="muted">No class hours set</span>';
+
+  const grouped={};
+  slots.forEach(s=>{
+    const d=Number(s.weekday);
+    (grouped[d]??=[]).push(String(s.class_time||'').slice(0,5));
+  });
+
+  return Object.entries(grouped).map(([day,times])=>`
+    <div class="ct-slot-summary">
+      <b>${CT_SLOT_DAYS[Number(day)]}</b>
+      <span>${times.map(t=>formatTime(t)).join(', ')}</span>
+    </div>`).join('');
+}
+
+function instructorSlotsModal(teamId){
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  if(!t)return alert('Instructor not found.');
+
+  const slots=(db.instructor_class_slots||[])
+    .filter(s=>String(s.team_id)===String(t.id))
+    .sort((a,b)=>(Number(a.weekday)-Number(b.weekday))||String(a.class_time).localeCompare(String(b.class_time)));
+
+  modal(`${esc(t.name)} · Class hours`,`
+    <p>Choose the <b>exact class hours</b> ${esc(t.name)} covers on each day.</p>
+    <p class="muted">Example: Monday 8:00 AM, 9:00 AM and 11:00 AM. A Monday 10:00 AM class will stay unassigned unless you add that exact hour.</p>
+
+    <div id="ctSlotRows">
+      ${slots.map(ctSlotRowHtml).join('')}
+    </div>
+
+    <button class="btn" type="button" onclick="ctAddSlotRow()">+ Add class hour</button>
+
+    <div style="margin-top:16px">
+      <button class="btn primary full" type="button" onclick="saveInstructorSlots('${t.id}')">
+        Save class hours & assign schedule
+      </button>
+    </div>
+  `);
+
+  if(!slots.length)ctAddSlotRow();
+}
+
+function ctSlotRowHtml(s={}){
+  return `
+    <div class="ct-slot-row" data-ct-slot-row>
+      <div>
+        <label>Day</label>
+        <select class="ct-slot-day">
+          ${CT_SLOT_DAYS.map((d,i)=>`<option value="${i}" ${Number(s.weekday)===i?'selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>Class time</label>
+        <input class="ct-slot-time" type="time" value="${String(s.class_time||'08:00').slice(0,5)}">
+      </div>
+      <div>
+        <label>Studio</label>
+        <select class="ct-slot-studio">
+          <option value="All" ${(s.studio_scope||'All')==='All'?'selected':''}>All</option>
+          <option value="Pilates" ${s.studio_scope==='Pilates'?'selected':''}>Pilates</option>
+          <option value="Megacore" ${s.studio_scope==='Megacore'?'selected':''}>Megacore</option>
+        </select>
+      </div>
+      <button class="btn small danger" type="button" onclick="this.closest('[data-ct-slot-row]').remove()">×</button>
+    </div>`;
+}
+
+function ctAddSlotRow(){
+  const box=document.getElementById('ctSlotRows');
+  if(box)box.insertAdjacentHTML('beforeend',ctSlotRowHtml({weekday:1,class_time:'08:00',studio_scope:'All'}));
+}
+
+async function saveInstructorSlots(teamId){
+  const rows=[...document.querySelectorAll('[data-ct-slot-row]')].map(r=>({
+    weekday:Number(r.querySelector('.ct-slot-day').value),
+    class_time:r.querySelector('.ct-slot-time').value,
+    studio_scope:r.querySelector('.ct-slot-studio').value
+  }));
+
+  if(rows.some(r=>!r.class_time))return alert('Choose a time for every class hour.');
+
+  const seen=new Set();
+  for(const r of rows){
+    const k=`${r.weekday}|${r.class_time}|${r.studio_scope}`;
+    if(seen.has(k))return alert(`You added ${CT_SLOT_DAYS[r.weekday]} ${formatTime(r.class_time)} more than once.`);
+    seen.add(k);
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {data,error}=await sb.rpc('set_instructor_class_slots',{
+    p_team_id:String(teamId),
+    p_slots:rows
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save class hours & assign schedule'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const assigned=Number(data?.assigned||0);
+  const ambiguous=Number(data?.ambiguous||0);
+  let msg=`Class hours saved. ${assigned} class${assigned===1?' was':'es were'} assigned automatically.`;
+  if(ambiguous)msg+=` ${ambiguous} overlapping exact-time slot${ambiguous===1?' was':'s were'} left unassigned.`;
+  alert(msg);
+}
+
+async function autoAssignUnassignedClasses(showResult=true){
+  const {data,error}=await sb.rpc('auto_assign_classes_from_slots');
+  if(error)return alert(error.message);
+  await loadAll();
+  if(showResult){
+    const assigned=Number(data?.assigned||0);
+    const ambiguous=Number(data?.ambiguous||0);
+    alert(`${assigned} class${assigned===1?'':'es'} assigned.${ambiguous?` ${ambiguous} overlapping exact-time slot${ambiguous===1?'':'s'} left unassigned.`:''}`);
+  }
+}
+
+function team(){
+  const month=currentYM();
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button>
+        <button class="btn" onclick="teamModal()">+ Add non-login team member</button>
+        <button class="btn" onclick="autoAssignUnassignedClasses()">↻ Assign schedule from class hours</button>
+        <input type="month" id="teamMonth" value="${month}" onchange="team()">
+      </div>
+
+      <div class="warning" style="margin-bottom:14px">
+        Choose the exact day and class time each instructor covers. Core Theory only auto-assigns an instructor when that exact slot matches.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Class hours</th>
+            <th>This month</th>
+            <th>Scheduled</th>
+            <th>Total taught</th>
+            <th>Class rate</th>
+            <th>Est. pay</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${db.team.filter(t=>!t.archived_at).map(t=>{
+            const s=t.auth_user_id?instructorStats(t.auth_user_id,month):{taught:0,scheduled:0,total:0};
+            const rate=Number(t.class_rate||0);
+            return `
+              <tr>
+                <td>
+                  <b>${esc(t.name)}</b>
+                  <div class="muted">${esc(t.email||'')}</div>
+                </td>
+                <td>${esc(t.role||'')}</td>
+                <td>${t.role==='Instructor'?ctInstructorSlotSummary(t):'<span class="muted">—</span>'}</td>
+                <td><b>${s.taught}</b></td>
+                <td>${s.scheduled}</td>
+                <td>${s.total}</td>
+                <td>${money(rate)}</td>
+                <td><b>${money(s.taught*rate)}</b></td>
+                <td>
+                  <button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>
+                  ${t.role==='Instructor'?` <button class="btn small" onclick="instructorSlotsModal('${t.id}')">Class hours</button>`:''}
+                  ${t.auth_user_id?`
+                    <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>
+                  `:` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`,
+    `Team`,
+    `Exact class-hour coverage, monthly teaching and payroll tracking`
+  );
+}
+
+(function ctExactSlotStyles(){
+  if(document.getElementById('ctExactSlotStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctExactSlotStyles';
+  s.textContent=`
+    .ct-slot-summary{display:grid;grid-template-columns:80px 1fr;gap:8px;font-size:12px;margin:3px 0}
+    .ct-slot-row{display:grid;grid-template-columns:1.2fr 1fr 1.1fr auto;gap:8px;align-items:end;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}
+    @media(max-width:700px){
+      .ct-slot-row{grid-template-columns:1fr 1fr}
+      .ct-slot-row>div:nth-child(3){grid-column:1/-1}
+      .ct-slot-row>.btn{width:100%}
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
