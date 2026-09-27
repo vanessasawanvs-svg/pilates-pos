@@ -6190,3 +6190,514 @@ loadAll = async function(){
 };
 
 
+
+// ================= CORE THEORY — RESTORE OPERATIONS SECTIONS =================
+// Keeps the monthly alerts/totals while restoring Events, Announcements and Promo Codes.
+
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const zeroAttendance=activeClasses.filter(c=>
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date() &&
+    classCheckedInCount(c)===0
+  ).length;
+
+  const unassigned=activeClasses.filter(c=>!c.instructor_user_id).length;
+
+  const waitlisted=db.bookings.filter(b=>{
+    const c=db.classes.find(x=>String(x.id)===String(b.class_id));
+    return b.status==='waitlist'&&c&&ctInOwnerMonth(c.class_date);
+  }).length;
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const events=(db.studio_events||[]).filter(e=>!e.archived_at);
+  const announcements=(db.announcements||[]).filter(a=>!a.archived_at);
+  const promos=(db.promo_codes||[]).filter(p=>!p.archived_at);
+
+  layout(`
+    <div class="grid two">
+
+      <div class="card">
+        <h3>Monthly alerts</h3>
+        <div class="cart-row"><span>Classes without instructor</span><b>${unassigned}</b></div>
+        <div class="cart-row"><span>Zero-attendance past classes</span><b>${zeroAttendance}</b></div>
+        <div class="cart-row"><span>Waitlisted bookings</span><b>${waitlisted}</b></div>
+        <div class="cart-row"><span>Cancelled classes</span><b>${monthClasses.filter(c=>c.cancelled).length}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Events & Specials</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="eventModal()">+ Event</button>
+        </div>
+
+        ${events.length?events.map(e=>{
+          const p=typeof eventPerformance==='function'
+            ?eventPerformance(e)
+            :{booked:0,checked:0,converted:0};
+
+          return `
+            <div class="cart-row">
+              <span>
+                <b>${esc(e.title)}</b>
+                <small>
+                  ${esc(e.start_date||'')} → ${esc(e.end_date||'')} ·
+                  ${esc(e.studio_scope||'Both')} ·
+                  ${e.active?'Active':'Inactive'}
+                </small>
+                <small>${esc(e.description||'')}</small>
+                ${p?`<small>Booked guests: ${p.booked||0} · Checked in: ${p.checked||0} · Converted: ${p.converted||0}</small>`:''}
+              </span>
+
+              <span>
+                <button class="btn small" onclick="eventModal('${e.id}')">Edit</button>
+                <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">
+                  ${e.active?'Deactivate':'Activate'}
+                </button>
+                <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                  ?`archiveRecord('studio_events','${e.id}')`
+                  :`removeItem('studio_events','${e.id}')`}">
+                  ${typeof archiveRecord==='function'?'Archive':'Delete'}
+                </button>
+              </span>
+            </div>`;
+        }).join(''):'<div class="empty">No events yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Announcements</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="announcementModal()">+ Announcement</button>
+        </div>
+
+        ${announcements.length?announcements.map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.title)}</b>
+              <small>${esc(a.message||'')}</small>
+              <small>${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small>
+            </span>
+
+            <span>
+              <button class="btn small" onclick="announcementModal('${a.id}')">Edit</button>
+              <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">
+                ${a.active===false?'Activate':'Deactivate'}
+              </button>
+              <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                ?`archiveRecord('announcements','${a.id}')`
+                :`removeItem('announcements','${a.id}')`}">
+                ${typeof archiveRecord==='function'?'Archive':'Delete'}
+              </button>
+            </span>
+          </div>`).join(''):'<div class="empty">No announcements yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Promo Codes</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="promoModal()">+ Promo code</button>
+        </div>
+
+        ${promos.length?promos.map(p=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(p.code)}</b>
+              <small>
+                ${p.discount_type==='fixed'
+                  ?money(p.discount_value)
+                  :`${p.discount_value??p.discount_percent??0}% off`}
+                · ${esc(p.studio_scope||'Both')}
+                · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'}
+                · ${p.active?'Active':'Inactive'}
+              </small>
+              ${p.starts_at||p.ends_at?`<small>${esc(p.starts_at||'No start')} → ${esc(p.ends_at||'No end')}</small>`:''}
+            </span>
+
+            <span>
+              <button class="btn small" onclick="promoModal('${p.id}')">Edit</button>
+              <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">
+                ${p.active?'Deactivate':'Activate'}
+              </button>
+              <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                ?`archiveRecord('promo_codes','${p.id}')`
+                :`removeItem('promo_codes','${p.id}')`}">
+                ${typeof archiveRecord==='function'?'Archive':'Delete'}
+              </button>
+            </span>
+          </div>`).join(''):'<div class="empty">No promo codes yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Reports & Backup</h3>
+        <p class="muted">Viewing ${esc(ctOwnerMonthLabel())}.</p>
+        <button class="btn" onclick="exportData()">Full backup JSON</button>
+        <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button>
+      </div>
+
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts, promos, events and announcements`);
+}
+
+
+
+// ================= CORE THEORY — RESTORE ALL DISPLACED FEATURES =================
+
+// Restore mobile drawer while keeping Owner month controls.
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+
+        <div class="role-chip">
+          ${esc(profile?.full_name||profile?.email||'')}
+          <small>${role}</small>
+        </div>
+
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              ${isOwner()?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${ctMonthPickerHtml()}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
+
+// Restore repeat controls in normal Add Class.
+function classModal(){
+  modal('Add class',classForm());
+  setTimeout(()=>toggleClassRepeatControls(),0);
+}
+
+
+// Dashboard: monthly figures + original alerts/revenue mix/today classes.
+function dashboard(){
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date)&&!c.cancelled);
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const checked=monthClasses.reduce((a,c)=>a+classCheckedInCount(c),0);
+  const cap=monthClasses.reduce((a,c)=>a+Number(c.capacity||0),0);
+  const occ=cap?Math.round(checked/cap*100):0;
+
+  const scopeRevenue=(scope)=>monthSales.reduce((sum,s)=>{
+    return sum+saleItems(s).reduce((a,i)=>{
+      if(i.kind!=='membership')return a;
+      const m=db.memberships.find(x=>String(x.id)===String(i.id));
+      return a+((m?.studio_scope||'Both')===scope?Number(i.price||0):0);
+    },0);
+  },0);
+
+  layout(`
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+      <div class="card kpi"><div class="label">Occupancy</div><div class="value">${occ}%</div></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid three">
+      <div class="card">
+        <h3>Studio alerts</h3>
+        ${alertRow('Pending payments','pending')}
+        ${alertRow('Clients with ≤1 session','low_sessions')}
+        ${alertRow('Packages expiring in 7 days','expiring')}
+        ${alertRow('Low-stock products','low_stock')}
+        ${alertRow('Classes without instructor','unassigned')}
+        ${alertRow('Zero-attendance past classes','zero_attendance')}
+        ${alertRow('Waitlisted bookings','waitlist')}
+      </div>
+
+      <div class="card">
+        <h3>Revenue mix · ${esc(ctOwnerMonthLabel())}</h3>
+        <div class="cart-row"><span>Pilates</span><b>${money(scopeRevenue('Pilates'))}</b></div>
+        <div class="cart-row"><span>Megacore</span><b>${money(scopeRevenue('Megacore'))}</b></div>
+        <div class="cart-row"><span>Mix packages</span><b>${money(scopeRevenue('Both'))}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${monthClasses.length}</b></div>
+        <div class="cart-row"><span>Checked in</span><b>${checked}</b></div>
+        <div class="cart-row"><span>Sales</span><b>${monthSales.length}</b></div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>Today's classes</h3>
+      ${db.classes.filter(c=>c.class_date===today()&&!c.cancelled).map(classCard).join('')||'<div class="empty">No classes today.</div>'}
+    </div>
+  `,'Dashboard',`${ctOwnerMonthLabel()} performance, alerts and today's operations`);
+}
+
+
+// Finance: restore Pending Orders + End-of-Day Reconciliation; payment history remains month-filtered.
+function finance(){
+  const active=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expRows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const rev=active.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expRows.reduce((a,e)=>a+Number(e.amount||0),0);
+  const pending=db.package_orders.filter(o=>o.status==='pending');
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>Pending package orders</h3>
+      ${pending.length?pending.map(o=>{
+        const c=db.clients.find(x=>String(x.id)===String(o.client_id));
+        const m=db.memberships.find(x=>String(x.id)===String(o.membership_id));
+        return `
+          <div class="booking-person">
+            <span>
+              <b>${esc(c?.name||'Client')}</b>
+              <small>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)}`:''} · Payment Pending</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change Package</button>
+              <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button>
+              <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button>
+            </span>
+          </div>`;
+      }).join(''):'<div class="empty">No pending package orders.</div>'}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>End-of-day reconciliation</h3>
+      <div class="toolbar">
+        <input id="reconDate" type="date" value="${today()}" onchange="renderReconciliation()">
+        <button class="btn" onclick="renderReconciliation()">Refresh</button>
+      </div>
+      <div id="reconBox"></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">Payment history · ${esc(ctOwnerMonthLabel())}</h3>
+        <input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px">
+      </div>
+      <div id="paymentHistoryRows"></div>
+    </div>
+  `,'Finance',`${ctOwnerMonthLabel()} payments, corrections and reconciliation`);
+
+  renderReconciliation();
+  renderPaymentHistory('');
+}
+
+
+// Operations: restore all original sections + monthly totals.
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const birthdays=db.clients.filter(c=>
+    c.birthday &&
+    String(c.birthday).slice(5,7)===String(Number(ownerMonth.split('-')[1])).padStart(2,'0')
+  );
+
+  const birthdayUsed=db.client_rewards.filter(r=>
+    r.reward_type==='birthday' &&
+    r.status==='used' &&
+    Number(r.issued_year)===Number(ownerMonth.split('-')[0])
+  ).length;
+
+  const events=(db.studio_events||[]).filter(e=>!e.archived_at);
+  const promos=(db.promo_codes||[]).filter(p=>!p.archived_at);
+  const announcements=(db.announcements||[]).filter(a=>!a.archived_at);
+
+  layout(`
+    <div class="grid two">
+
+      <div class="card">
+        <h3>Studio alerts</h3>
+        ${alertRow('Pending payments','pending')}
+        ${alertRow('Clients with ≤1 session','low_sessions')}
+        ${alertRow('Packages expiring in 7 days','expiring')}
+        ${alertRow('Low-stock products','low_stock')}
+        ${alertRow('Classes without instructor','unassigned')}
+        ${alertRow('Zero-attendance past classes','zero_attendance')}
+        ${alertRow('Waitlisted bookings','waitlist')}
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Birthdays · ${esc(ctOwnerMonthLabel())}</h3>
+        <div class="cart-row"><span>Birthdays</span><b>${birthdays.length}</b></div>
+        <div class="cart-row"><span>Birthday gifts used this year</span><b>${birthdayUsed}</b></div>
+        ${birthdays.slice(0,12).map(c=>`
+          <div class="cart-row">
+            <span>${esc(c.name)}</span>
+            <small>${esc(String(c.birthday).slice(5))}</small>
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h3>Events & Specials</h3>
+        <div class="toolbar"><button class="btn primary" onclick="eventModal()">+ Event</button></div>
+        ${events.map(e=>{
+          const p=eventPerformance(e);
+          return `
+            <div class="cart-row">
+              <span>
+                <b>${esc(e.title)}</b>
+                <small>${esc(e.start_date)} → ${esc(e.end_date)} · ${esc(e.studio_scope)} · ${e.active?'Active':'Inactive'}</small>
+                <small>Booked guests: ${p.booked} · Checked in: ${p.checked} · Converted: ${p.converted}</small>
+              </span>
+              <span>
+                <button class="btn small" onclick="eventModal('${e.id}')">Edit</button>
+                <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">${e.active?'Deactivate':'Activate'}</button>
+                <button class="btn small danger" onclick="archiveRecord('studio_events','${e.id}')">Archive</button>
+              </span>
+            </div>`;
+        }).join('')||'<div class="empty">No events yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Promo codes</h3>
+        <div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>
+        ${promos.map(p=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(p.code)}</b>
+              <small>${p.discount_type==='fixed'?money(p.discount_value):`${p.discount_value??p.discount_percent}% off`} · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'} · ${p.active?'Active':'Inactive'}</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="promoModal('${p.id}')">Edit</button>
+              <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button>
+              <button class="btn small danger" onclick="archiveRecord('promo_codes','${p.id}')">Archive</button>
+            </span>
+          </div>`).join('')||'<div class="empty">No promo codes.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Announcements</h3>
+        <div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>
+        ${announcements.map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.title)}</b>
+              <small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="announcementModal('${a.id}')">Edit</button>
+              <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button>
+              <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button>
+            </span>
+          </div>`).join('')||'<div class="empty">No announcements.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Reports & backup</h3>
+        <div class="cart-row"><span>Monthly classes</span><b>${activeClasses.length}</b></div>
+        <div class="toolbar">
+          <input id="reportFrom" type="date" value="${ownerMonth}-01">
+          <input id="reportTo" type="date" value="${dateISO(new Date(Number(ownerMonth.split('-')[0]),Number(ownerMonth.split('-')[1]),0))}">
+          <button class="btn" onclick="exportDateRangeReport()">Export date-range CSV</button>
+          <button class="btn" onclick="exportData()">Full backup JSON</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Audit log</h3>
+        ${db.audit_log.slice(-30).reverse().map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.action)}</b>
+              <small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small>
+            </span>
+          </div>`).join('')||'<div class="empty">Activity will appear here.</div>'}
+      </div>
+
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts, events, promos, announcements and reports`);
+}
+
+
