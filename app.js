@@ -5848,3 +5848,345 @@ function expenses(){
   `,'Expenses',`${ctOwnerMonthLabel()} studio costs`);
 }
 
+
+
+// ================= CORE THEORY — INVENTORY PRODUCT VARIANTS =================
+
+function ctProductVariants(productId){
+  return (db.product_variants||[])
+    .filter(v=>String(v.product_id)===String(productId)&&v.active!==false)
+    .sort((a,b)=>String(a.variant_name||'').localeCompare(String(b.variant_name||'')));
+}
+
+function ctVariantLabel(product){
+  return product?.variant_type || 'Variant';
+}
+
+function ctVariantRowsText(productId){
+  return ctProductVariants(productId)
+    .map(v=>`${v.variant_name} | ${Number(v.stock||0)}`)
+    .join('\n');
+}
+
+async function ctReloadProductVariants(){
+  if(isOwner()){
+    const {data,error}=await ctFetchAllRows('product_variants');
+    if(!error)db.product_variants=data||[];
+    return;
+  }
+
+  if(isFrontDeskStaff()&&db.frontDeskDuty){
+    const {data,error}=await sb.rpc('front_desk_product_variants');
+    if(!error)db.product_variants=data||[];
+  }
+}
+
+function productModal(p=null){
+  const editing=!!p;
+  const variantType=p?.variant_type||'';
+
+  modal(editing?'Edit product':'Add product',`
+    <div class="form">
+      <div>
+        <label>Name</label>
+        <input id="pname" value="${esc(p?.name||'')}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <input id="pcat" value="${esc(p?.category||'Retail')}">
+      </div>
+
+      <div>
+        <label>Cost</label>
+        <input id="pcost" type="number" step=".01" value="${p?.cost??''}">
+      </div>
+
+      <div>
+        <label>Sell price</label>
+        <input id="pprice" type="number" step=".01" value="${p?.price??''}">
+      </div>
+
+      <div>
+        <label>Low stock</label>
+        <input id="pmin" type="number" value="${p?.minimum_stock??5}">
+      </div>
+
+      <div>
+        <label>Variant type</label>
+        <select id="pvarianttype" onchange="ctToggleVariantEditor()">
+          <option value="" ${!variantType?'selected':''}>No variants</option>
+          <option value="Color" ${variantType==='Color'?'selected':''}>Color</option>
+          <option value="Flavor" ${variantType==='Flavor'?'selected':''}>Flavor</option>
+          <option value="Size" ${variantType==='Size'?'selected':''}>Size</option>
+          <option value="Style" ${variantType==='Style'?'selected':''}>Style</option>
+          <option value="Other" ${variantType==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+
+      <div class="full" id="ctVariantEditor" style="${variantType?'':'display:none'}">
+        <label>Variants & stock</label>
+        <textarea id="pvariants" rows="8" placeholder="Black | 5
+Burgundy | 4
+Grey | 3">${editing?esc(ctVariantRowsText(p.id)):''}</textarea>
+        <small class="muted">
+          One option per line: <b>Name | Stock</b><br>
+          Example for a reformer cover: Black | 5
+        </small>
+      </div>
+
+      <div class="full">
+        <div class="notice card" style="margin:0">
+          <b>Total stock</b>
+          <p class="muted" style="margin:4px 0 0">
+            If the product has variants, total stock is calculated automatically from all colors / flavors / sizes.
+          </p>
+        </div>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">
+          ${editing?'Save changes':'Save product'}
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctToggleVariantEditor(){
+  const box=$("#ctVariantEditor");
+  if(box)box.style.display=$("#pvarianttype")?.value?'block':'none';
+}
+
+function ctParseVariants(){
+  const type=$("#pvarianttype")?.value||'';
+  if(!type)return {type:'',rows:[]};
+
+  const raw=$("#pvariants")?.value||'';
+  const rows=[];
+  const errors=[];
+
+  raw.split(/\r?\n/).forEach((line,i)=>{
+    const x=line.trim();
+    if(!x)return;
+    const parts=x.split('|').map(v=>v.trim());
+    if(parts.length!==2){
+      errors.push(`Line ${i+1}: use Name | Stock`);
+      return;
+    }
+    const name=parts[0];
+    const stock=Number(parts[1]);
+    if(!name){
+      errors.push(`Line ${i+1}: variant name is missing.`);
+      return;
+    }
+    if(!Number.isInteger(stock)||stock<0){
+      errors.push(`Line ${i+1}: stock must be 0 or a whole number.`);
+      return;
+    }
+    rows.push({variant_name:name,stock});
+  });
+
+  return {type,rows,errors};
+}
+
+async function ctSaveProductVariants(productId,variantType,rows){
+  const {error:delError}=await sb.from('product_variants').delete().eq('product_id',productId);
+  if(delError)return delError;
+
+  if(rows.length){
+    const {error:insError}=await sb.from('product_variants').insert(
+      rows.map(r=>({
+        product_id:productId,
+        variant_name:r.variant_name,
+        stock:r.stock,
+        active:true
+      }))
+    );
+    if(insError)return insError;
+  }
+
+  const total=rows.reduce((a,r)=>a+Number(r.stock||0),0);
+  const {error:updateError}=await sb.from('products')
+    .update({variant_type:variantType||null,stock:variantType?total:Number($("#pstock")?.value||0)})
+    .eq('id',productId);
+
+  return updateError||null;
+}
+
+async function addProduct(){
+  const parsed=ctParseVariants();
+  if(parsed.errors?.length)return alert(parsed.errors.join('\n'));
+
+  const payload={
+    name:$("#pname").value.trim(),
+    category:$("#pcat").value.trim(),
+    cost:+$("#pcost").value,
+    price:+$("#pprice").value,
+    stock:parsed.type?parsed.rows.reduce((a,r)=>a+r.stock,0):0,
+    minimum_stock:+$("#pmin").value,
+    variant_type:parsed.type||null
+  };
+
+  if(!payload.name)return alert('Enter a product name.');
+
+  const {data,error}=await sb.from('products').insert(payload).select('*').single();
+  if(error)return alert(error.message);
+
+  if(parsed.type){
+    const vError=await ctSaveProductVariants(data.id,parsed.type,parsed.rows);
+    if(vError)return alert(vError.message);
+  }
+
+  $("#modal").remove();
+  await loadAll();
+}
+
+async function saveProduct(id){
+  const parsed=ctParseVariants();
+  if(parsed.errors?.length)return alert(parsed.errors.join('\n'));
+
+  const product=db.products.find(x=>String(x.id)===String(id));
+  const total=parsed.type?parsed.rows.reduce((a,r)=>a+r.stock,0):Number(product?.stock||0);
+
+  const payload={
+    name:$("#pname").value.trim(),
+    category:$("#pcat").value.trim(),
+    cost:+$("#pcost").value,
+    price:+$("#pprice").value,
+    stock:total,
+    minimum_stock:+$("#pmin").value,
+    variant_type:parsed.type||null
+  };
+
+  if(!payload.name)return alert('Enter a product name.');
+
+  const {error}=await sb.from('products').update(payload).eq('id',id);
+  if(error)return alert(error.message);
+
+  const vError=await ctSaveProductVariants(id,parsed.type,parsed.rows);
+  if(vError)return alert(vError.message);
+
+  $("#modal").remove();
+  await loadAll();
+  alert('Product updated.');
+}
+
+function inventory(){
+  const rows=db.products||[];
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="productModal()">+ Add product</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variants</th>
+            <th>Cost</th>
+            <th>Sell</th>
+            <th>Total stock</th>
+            <th>Low stock</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows.map(p=>{
+            const variants=ctProductVariants(p.id);
+            return `
+              <tr>
+                <td>
+                  <b>${esc(p.name)}</b>
+                  <div class="muted">${esc(p.category||'')}</div>
+                </td>
+
+                <td>
+                  ${variants.length
+                    ? `<b>${esc(ctVariantLabel(p))}</b><br>${variants.map(v=>`<span class="badge">${esc(v.variant_name)} · ${Number(v.stock||0)}</span>`).join(' ')}`
+                    : '<span class="muted">—</span>'}
+                </td>
+
+                <td>${money(p.cost)}</td>
+                <td>${money(p.price)}</td>
+                <td>${Number(p.stock||0)}</td>
+                <td>${p.minimum_stock??0}</td>
+
+                <td>
+                  <button class="btn small" onclick="editProduct('${p.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `,'Inventory','Products, variants, colors, flavors and stock');
+}
+
+function ctChooseProductVariant(product){
+  const variants=ctProductVariants(product.id).filter(v=>Number(v.stock||0)>0);
+  if(!variants.length)return alert(`No ${ctVariantLabel(product).toLowerCase()} options are in stock.`);
+
+  modal(`Choose ${esc(ctVariantLabel(product))}`,`
+    <p><b>${esc(product.name)}</b></p>
+    <div style="display:grid;gap:8px">
+      ${variants.map(v=>`
+        <button class="btn" onclick="ctAddVariantToCart('${product.id}','${v.id}')">
+          ${esc(v.variant_name)}
+          <span class="muted"> · ${Number(v.stock||0)} in stock</span>
+        </button>
+      `).join('')}
+    </div>
+  `);
+}
+
+function ctAddVariantToCart(productId,variantId){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const p=products.find(x=>String(x.id)===String(productId));
+  const v=(db.product_variants||[]).find(x=>String(x.id)===String(variantId));
+  if(!p||!v)return alert('Variant not found. Refresh and try again.');
+  if(Number(v.stock||0)<=0)return alert('This option is out of stock.');
+
+  cart.push({
+    ...p,
+    kind:'product',
+    variant_id:v.id,
+    variant_name:v.variant_name,
+    name:`${p.name} · ${v.variant_name}`
+  });
+
+  $("#modal")?.remove();
+  posPromo=null;
+  pos();
+}
+
+function addCart(kind,id){
+  const src=kind==='product'
+    ?(isOwner()?db.products:(db.frontDeskProducts||[]))
+    :(isOwner()?db.memberships:(db.frontDeskMemberships||[]));
+
+  const x=src.find(a=>String(a.id)===String(id));
+  if(!x)return alert('Item not found. Refresh and try again.');
+
+  if(kind==='product' && x.variant_type){
+    return ctChooseProductVariant(x);
+  }
+
+  cart.push({...x,kind});
+  posPromo=null;
+  pos();
+}
+
+// Make sure variants are available after normal data loading.
+const ctOriginalLoadAllForVariants = loadAll;
+loadAll = async function(){
+  await ctOriginalLoadAllForVariants();
+  if(!session||!profile)return;
+  await ctReloadProductVariants();
+};
+
+
