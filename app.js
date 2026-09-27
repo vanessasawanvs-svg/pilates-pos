@@ -7057,3 +7057,311 @@ function ctAddVariantToCart(productId,variantId){
   pos();
 }
 
+
+
+// ================= CORE THEORY — VARIANT PRICE/COST ONLY FOR SIZE =================
+
+function ctVariantRowsText(productId){
+  const product=(db.products||[]).find(p=>String(p.id)===String(productId));
+  const isSize=product?.variant_type==='Size';
+
+  return ctProductVariants(productId)
+    .map(v=>{
+      if(isSize){
+        const cost=v.cost_override==null?'':Number(v.cost_override);
+        const price=v.price_override==null?'':Number(v.price_override);
+        return `${v.variant_name} | ${Number(v.stock||0)} | ${cost} | ${price}`;
+      }
+      return `${v.variant_name} | ${Number(v.stock||0)}`;
+    })
+    .join('\n');
+}
+
+function productModal(p=null){
+  const editing=!!p;
+  const variantType=p?.variant_type||'';
+  const sizeMode=variantType==='Size';
+
+  modal(editing?'Edit product':'Add product',`
+    <div class="form">
+      <div>
+        <label>Name</label>
+        <input id="pname" value="${esc(p?.name||'')}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <input id="pcat" value="${esc(p?.category||'Retail')}">
+      </div>
+
+      <div>
+        <label>Base cost</label>
+        <input id="pcost" type="number" step=".01" value="${p?.cost??''}">
+      </div>
+
+      <div>
+        <label>Base sell price</label>
+        <input id="pprice" type="number" step=".01" value="${p?.price??''}">
+      </div>
+
+      <div>
+        <label>Low stock</label>
+        <input id="pmin" type="number" value="${p?.minimum_stock??5}">
+      </div>
+
+      <div>
+        <label>Variant type</label>
+        <select id="pvarianttype" onchange="ctToggleVariantEditor();ctRefreshVariantHelp()">
+          <option value="" ${!variantType?'selected':''}>No variants</option>
+          <option value="Color" ${variantType==='Color'?'selected':''}>Color</option>
+          <option value="Flavor" ${variantType==='Flavor'?'selected':''}>Flavor</option>
+          <option value="Size" ${variantType==='Size'?'selected':''}>Size</option>
+          <option value="Style" ${variantType==='Style'?'selected':''}>Style</option>
+          <option value="Other" ${variantType==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+
+      <div class="full" id="ctVariantEditor" style="${variantType?'':'display:none'}">
+        <label>Variants</label>
+        <textarea id="pvariants" rows="10" placeholder="${sizeMode
+          ? 'Small | 5 | 8 | 15\\nMedium | 4 | 10 | 18\\nLarge | 3 | 12 | 22'
+          : 'Black | 5\\nBurgundy | 4\\nGrey | 3'}">${editing?esc(ctVariantRowsText(p.id)):''}</textarea>
+
+        <small class="muted" id="ctVariantHelp">
+          ${sizeMode
+            ? 'For Size: <b>Name | Stock | Cost | Sell Price</b>'
+            : 'For Color / Flavor / Style / Other: <b>Name | Stock</b>'}
+        </small>
+      </div>
+
+      <div class="full">
+        <div class="notice card" style="margin:0">
+          <b>Pricing rule</b>
+          <p class="muted" style="margin:4px 0 0">
+            Only <b>Size</b> variants can have their own cost and sell price.
+            Color, Flavor, Style and Other use the product's base cost and base sell price.
+          </p>
+        </div>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">
+          ${editing?'Save changes':'Save product'}
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctRefreshVariantHelp(){
+  const type=$("#pvarianttype")?.value||'';
+  const area=$("#pvariants");
+  const help=$("#ctVariantHelp");
+  if(!area||!help)return;
+
+  if(type==='Size'){
+    area.placeholder='Small | 5 | 8 | 15\nMedium | 4 | 10 | 18\nLarge | 3 | 12 | 22';
+    help.innerHTML='For Size: <b>Name | Stock | Cost | Sell Price</b>';
+  }else{
+    area.placeholder='Black | 5\nBurgundy | 4\nGrey | 3';
+    help.innerHTML='For Color / Flavor / Style / Other: <b>Name | Stock</b>';
+  }
+}
+
+function ctParseVariants(){
+  const type=$("#pvarianttype")?.value||'';
+  if(!type)return {type:'',rows:[],errors:[]};
+
+  const raw=$("#pvariants")?.value||'';
+  const rows=[];
+  const errors=[];
+  const isSize=type==='Size';
+
+  raw.split(/\r?\n/).forEach((line,i)=>{
+    const x=line.trim();
+    if(!x)return;
+
+    const parts=x.split('|').map(v=>v.trim());
+
+    if(isSize){
+      if(parts.length!==4){
+        errors.push(`Line ${i+1}: Size must use Name | Stock | Cost | Sell Price`);
+        return;
+      }
+    }else{
+      if(parts.length!==2){
+        errors.push(`Line ${i+1}: ${type} must use Name | Stock`);
+        return;
+      }
+    }
+
+    const name=parts[0];
+    const stock=Number(parts[1]);
+
+    if(!name){
+      errors.push(`Line ${i+1}: variant name is missing.`);
+      return;
+    }
+
+    if(!Number.isInteger(stock)||stock<0){
+      errors.push(`Line ${i+1}: stock must be 0 or a whole number.`);
+      return;
+    }
+
+    let cost=null, price=null;
+
+    if(isSize){
+      cost=Number(parts[2]);
+      price=Number(parts[3]);
+
+      if(!Number.isFinite(cost)||cost<0){
+        errors.push(`Line ${i+1}: size cost must be a valid number.`);
+        return;
+      }
+
+      if(!Number.isFinite(price)||price<0){
+        errors.push(`Line ${i+1}: size sell price must be a valid number.`);
+        return;
+      }
+    }
+
+    rows.push({
+      variant_name:name,
+      stock,
+      cost_override:cost,
+      price_override:price
+    });
+  });
+
+  return {type,rows,errors};
+}
+
+function inventory(){
+  const rows=db.products||[];
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="productModal()">+ Add product</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variants</th>
+            <th>Base cost</th>
+            <th>Base sell</th>
+            <th>Total stock</th>
+            <th>Low stock</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows.map(p=>{
+            const variants=ctProductVariants(p.id);
+            const isSize=p.variant_type==='Size';
+
+            return `
+              <tr>
+                <td>
+                  <b>${esc(p.name)}</b>
+                  <div class="muted">${esc(p.category||'')}</div>
+                </td>
+
+                <td>
+                  ${variants.length
+                    ? `<b>${esc(ctVariantLabel(p))}</b><br>
+                       ${variants.map(v=>{
+                         if(isSize){
+                           const cost=v.cost_override==null?Number(p.cost||0):Number(v.cost_override);
+                           const price=v.price_override==null?Number(p.price||0):Number(v.price_override);
+
+                           return `<div style="margin:4px 0">
+                             <span class="badge">${esc(v.variant_name)} · Stock ${Number(v.stock||0)}</span>
+                             <small class="muted"> Cost ${money(cost)} · Sell ${money(price)}</small>
+                           </div>`;
+                         }
+
+                         return `<div style="margin:4px 0">
+                           <span class="badge">${esc(v.variant_name)} · Stock ${Number(v.stock||0)}</span>
+                         </div>`;
+                       }).join('')}`
+                    : '<span class="muted">—</span>'}
+                </td>
+
+                <td>${money(p.cost)}</td>
+                <td>${money(p.price)}</td>
+                <td>${Number(p.stock||0)}</td>
+                <td>${p.minimum_stock??0}</td>
+
+                <td>
+                  <button class="btn small" onclick="editProduct('${p.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `,'Inventory','Products, variants and stock');
+}
+
+function ctChooseProductVariant(product){
+  const variants=ctProductVariants(product.id).filter(v=>Number(v.stock||0)>0);
+  if(!variants.length)return alert(`No ${ctVariantLabel(product).toLowerCase()} options are in stock.`);
+
+  const isSize=product.variant_type==='Size';
+
+  modal(`Choose ${esc(ctVariantLabel(product))}`,`
+    <p><b>${esc(product.name)}</b></p>
+    <div style="display:grid;gap:8px">
+      ${variants.map(v=>{
+        const price=isSize && v.price_override!=null
+          ?Number(v.price_override)
+          :Number(product.price||0);
+
+        return `
+          <button class="btn" onclick="ctAddVariantToCart('${product.id}','${v.id}')">
+            <b>${esc(v.variant_name)}</b>
+            <span class="muted"> · ${money(price)} · ${Number(v.stock||0)} in stock</span>
+          </button>`;
+      }).join('')}
+    </div>
+  `);
+}
+
+function ctAddVariantToCart(productId,variantId){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const p=products.find(x=>String(x.id)===String(productId));
+  const v=(db.product_variants||[]).find(x=>String(x.id)===String(variantId));
+
+  if(!p||!v)return alert('Variant not found. Refresh and try again.');
+  if(Number(v.stock||0)<=0)return alert('This option is out of stock.');
+
+  const isSize=p.variant_type==='Size';
+
+  const finalPrice=isSize && v.price_override!=null
+    ?Number(v.price_override)
+    :Number(p.price||0);
+
+  const finalCost=isSize && v.cost_override!=null
+    ?Number(v.cost_override)
+    :Number(p.cost||0);
+
+  cart.push({
+    ...p,
+    kind:'product',
+    variant_id:v.id,
+    variant_name:v.variant_name,
+    name:`${p.name} · ${v.variant_name}`,
+    price:finalPrice,
+    cost:finalCost
+  });
+
+  $("#modal")?.remove();
+  posPromo=null;
+  pos();
+}
+
