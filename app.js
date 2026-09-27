@@ -5433,3 +5433,268 @@ async function book(){
   }).join('');
 }
 
+
+
+// ================= CORE THEORY — OWNER MONTH CATEGORIZATION =================
+
+let ownerMonth = (() => {
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+})();
+
+function ctMonthKey(v){ return String(v||'').slice(0,7); }
+function ctInOwnerMonth(v){ return ctMonthKey(v)===ownerMonth; }
+
+function ctOwnerMonthLabel(){
+  const [y,m]=ownerMonth.split('-').map(Number);
+  return new Date(y,m-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'});
+}
+
+function ctChangeOwnerMonth(v){
+  ownerMonth=v||currentYM();
+  render();
+}
+
+function ctShiftOwnerMonth(delta){
+  const [y,m]=ownerMonth.split('-').map(Number);
+  const d=new Date(y,m-1+delta,1);
+  ownerMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  render();
+}
+
+function ctMonthPickerHtml(){
+  if(!isOwner())return '';
+  return `
+    <div class="ct-month-picker">
+      <button class="btn small" onclick="ctShiftOwnerMonth(-1)">←</button>
+      <input type="month" value="${ownerMonth}" onchange="ctChangeOwnerMonth(this.value)">
+      <button class="btn small" onclick="ctShiftOwnerMonth(1)">→</button>
+      <button class="btn small" onclick="ctChangeOwnerMonth(currentYM())">This month</button>
+    </div>
+  `;
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  $("#app").innerHTML=`
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="nav">${nav()}</div>
+        <div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div>
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h1>${title}</h1>
+            <p>${subtitle}</p>
+            ${isOwner()?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+            <div class="sync-note">☁ Cloud connected</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${ctMonthPickerHtml()}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{page='custom:'+b.dataset.custom;render()});
+}
+
+function dashboard(){
+  const sales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const classes=db.classes.filter(c=>ctInOwnerMonth(c.class_date)&&!c.cancelled);
+  const rev=sales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const taught=classes.filter(classWasTaught).length;
+  const checked=classes.reduce((a,c)=>a+classCheckedInCount(c),0);
+  const cap=classes.reduce((a,c)=>a+Number(c.capacity||0),0);
+  const occupancy=cap?Math.round((checked/cap)*100):0;
+
+  layout(`
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+      <div class="card kpi"><div class="label">Occupancy</div><div class="value">${occupancy}%</div></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="grid three">
+      <div class="card">
+        <h3>Classes</h3>
+        <div class="cart-row"><span>Scheduled</span><b>${classes.length}</b></div>
+        <div class="cart-row"><span>Taught</span><b>${taught}</b></div>
+        <div class="cart-row"><span>Checked in</span><b>${checked}</b></div>
+      </div>
+      <div class="card">
+        <h3>Sales</h3>
+        <div class="cart-row"><span>Transactions</span><b>${sales.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+      </div>
+      <div class="card">
+        <h3>Expenses</h3>
+        <div class="cart-row"><span>Entries</span><b>${expenses.length}</b></div>
+        <div class="cart-row"><span>Total</span><b>${money(exp)}</b></div>
+      </div>
+    </div>
+  `,'Dashboard','Monthly studio overview');
+}
+
+function expenses(){
+  const rows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date))
+    .sort((a,b)=>String(b.expense_date||'').localeCompare(String(a.expense_date||'')));
+  const total=rows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="expenseModal()">+ Add expense</button>
+        <div class="muted"><b>${esc(ctOwnerMonthLabel())}</b> · ${money(total)} total</div>
+      </div>
+      ${rows.length?`
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead>
+          <tbody>${rows.map(e=>`
+            <tr>
+              <td>${esc(e.expense_date)}</td>
+              <td>${esc(e.category)}</td>
+              <td>${esc(e.description||'')}</td>
+              <td>${money(e.amount)}</td>
+              <td>
+                <button class="btn small" onclick="expenseModal('${e.id}')">Edit</button>
+                <button class="btn small danger" onclick="removeItem('expenses','${e.id}')">Delete</button>
+              </td>
+            </tr>`).join('')}</tbody>
+        </table>
+      `:'<div class="empty">No expenses in this month.</div>'}
+    </div>
+  `,'Expenses',`${ctOwnerMonthLabel()} studio costs`);
+}
+
+function finance(){
+  const active=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expRows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const rev=active.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expRows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">Sales · ${esc(ctOwnerMonthLabel())}</h3>
+        <input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px">
+      </div>
+      <div id="paymentHistoryRows"></div>
+    </div>
+  `,'Finance',`${ctOwnerMonthLabel()} sales and profit`);
+  renderPaymentHistory('');
+}
+
+function renderPaymentHistory(query=''){
+  const box=$("#paymentHistoryRows");
+  if(!box)return;
+  const q=String(query||'').trim().toLowerCase();
+  const rows=[...db.sales]
+    .filter(s=>ctInOwnerMonth(s.created_at))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))
+    .filter(s=>{
+      const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total,saleCollector(s)].join(' ').toLowerCase();
+      return !q||hay.includes(q);
+    });
+
+  box.innerHTML=rows.length?`
+    <div style="overflow:auto">
+      <table>
+        <thead><tr><th>Date / time</th><th>Client</th><th>Paid for</th><th>Method</th><th>Amount</th><th>Recorded by</th><th></th></tr></thead>
+        <tbody>${rows.map(s=>`
+          <tr>
+            <td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}${s.edited_at?'<div class="muted">Edited</div>':''}</td>
+            <td><b>${esc(saleClientName(s))}</b></td>
+            <td>${esc(saleWhat(s))}</td>
+            <td>${esc(s.payment_method||'—')}</td>
+            <td><b>${money(s.total)}</b>${s.voided_at?'<div class="muted">Voided</div>':''}</td>
+            <td>${esc(saleCollector(s))}</td>
+            <td>
+              <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+              ${s.voided_at?'<span class="badge">Voided</span>':`<button class="btn small" onclick="editSaleModal('${s.id}')">Edit</button> <button class="btn small danger" onclick="voidSale('${s.id}')">Void</button>`}
+            </td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `:'<div class="empty">No sales in this month.</div>';
+}
+
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const zeroAttendance=activeClasses.filter(c=>
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date() &&
+    classCheckedInCount(c)===0
+  ).length;
+
+  const unassigned=activeClasses.filter(c=>!c.instructor_user_id).length;
+  const waitlisted=db.bookings.filter(b=>{
+    const c=db.classes.find(x=>String(x.id)===String(b.class_id));
+    return b.status==='waitlist'&&c&&ctInOwnerMonth(c.class_date);
+  }).length;
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="grid two">
+      <div class="card">
+        <h3>Monthly alerts</h3>
+        <div class="cart-row"><span>Classes without instructor</span><b>${unassigned}</b></div>
+        <div class="cart-row"><span>Zero-attendance past classes</span><b>${zeroAttendance}</b></div>
+        <div class="cart-row"><span>Waitlisted bookings</span><b>${waitlisted}</b></div>
+        <div class="cart-row"><span>Cancelled classes</span><b>${monthClasses.filter(c=>c.cancelled).length}</b></div>
+      </div>
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+      <div class="card">
+        <h3>Reports & backup</h3>
+        <p class="muted">Viewing ${esc(ctOwnerMonthLabel())}.</p>
+        <button class="btn" onclick="exportData()">Full backup JSON</button>
+        <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button>
+      </div>
+      <div class="card">
+        <h3>Events & announcements</h3>
+        <p class="muted">Events and announcements remain global because they can span more than one month.</p>
+        <div class="cart-row"><span>Active events</span><b>${db.studio_events.filter(e=>!e.archived_at&&e.active).length}</b></div>
+        <div class="cart-row"><span>Active announcements</span><b>${db.announcements.filter(a=>a.active!==false).length}</b></div>
+      </div>
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts and studio activity`);
+}
+
+(function(){
+  if(document.getElementById('ctMonthStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctMonthStyles';
+  s.textContent=`
+    .ct-month-picker{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .ct-month-picker input[type="month"]{border:1px solid rgba(0,0,0,.12);border-radius:10px;padding:8px 10px;background:#fff;min-width:145px}
+    @media(max-width:700px){.topbar{align-items:flex-start;gap:12px}.ct-month-picker{width:100%}}
+  `;
+  document.head.appendChild(s);
+})();
+
