@@ -5698,3 +5698,153 @@ function operations(){
   document.head.appendChild(s);
 })();
 
+
+
+// ================= CORE THEORY — EXPENSE QUANTITY =================
+
+function expenseModal(id=''){
+  const e=id?db.expenses.find(x=>String(x.id)===String(id)):null;
+  const qty=Number(e?.quantity||1);
+  const total=Number(e?.amount||0);
+  const unit=qty>0?total/qty:total;
+
+  modal(e?'Edit expense':'Add expense',`
+    <div class="form">
+      <div>
+        <label>Date</label>
+        <input type="date" id="edate" value="${e?.expense_date||today()}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <select id="ecat">
+          ${['Electricity','Rent','Water','Internet','Cleaning','Payroll','Inventory','Marketing','Maintenance','Other']
+            .map(x=>`<option ${x===e?.category?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Description</label>
+        <input id="edesc" value="${esc(e?.description||'')}" placeholder="e.g. Grip socks">
+      </div>
+
+      <div>
+        <label>Quantity</label>
+        <input id="eqty" type="number" min="1" step="1" value="${qty}" oninput="updateExpenseTotal()">
+      </div>
+
+      <div>
+        <label>Price per item</label>
+        <input id="eunit" type="number" min="0" step=".01" value="${unit||''}" oninput="updateExpenseTotal()">
+      </div>
+
+      <div>
+        <label>Total</label>
+        <input id="eamount" type="number" step=".01" value="${total||''}" readonly>
+      </div>
+
+      <div>
+        <label>Payment</label>
+        <select id="epay">
+          ${['Cash','Card','Whish','Transfer'].map(x=>`<option ${x===e?.payment_method?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${e?`saveExpense('${e.id}')`:'addExpense()'}">
+          ${e?'Save changes':'Save expense'}
+        </button>
+      </div>
+    </div>
+  `);
+
+  updateExpenseTotal();
+}
+
+function updateExpenseTotal(){
+  const qty=Math.max(1,Number($("#eqty")?.value||1));
+  const unit=Math.max(0,Number($("#eunit")?.value||0));
+  const total=$("#eamount");
+  if(total)total.value=(qty*unit).toFixed(2);
+}
+
+async function addExpense(){
+  const quantity=Math.max(1,parseInt($("#eqty").value||'1',10));
+  const payload={
+    expense_date:$("#edate").value,
+    category:$("#ecat").value,
+    description:$("#edesc").value,
+    quantity,
+    amount:+$("#eamount").value,
+    payment_method:$("#epay").value,
+    created_by:session.user.id
+  };
+  const {error}=await sb.from('expenses').insert(payload);
+  if(error)return alert(error.message);
+  $("#modal").remove();
+  await loadAll();
+}
+
+async function saveExpense(id){
+  const quantity=Math.max(1,parseInt($("#eqty").value||'1',10));
+  const payload={
+    expense_date:$("#edate").value,
+    category:$("#ecat").value,
+    description:$("#edesc").value,
+    quantity,
+    amount:+$("#eamount").value,
+    payment_method:$("#epay").value
+  };
+  const {error}=await sb.from('expenses').update(payload).eq('id',id);
+  if(error)return alert(error.message);
+  $("#modal").remove();
+  await loadAll();
+  alert('Expense updated.');
+}
+
+function expenses(){
+  const rows=db.expenses
+    .filter(e=>ctInOwnerMonth(e.expense_date))
+    .sort((a,b)=>String(b.expense_date||'').localeCompare(String(a.expense_date||'')));
+
+  const total=rows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="expenseModal()">+ Add expense</button>
+        <div class="muted"><b>${esc(ctOwnerMonthLabel())}</b> · ${money(total)} total</div>
+      </div>
+
+      ${rows.length?`
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Qty</th>
+              <th>Total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(e=>`
+              <tr>
+                <td>${esc(e.expense_date)}</td>
+                <td>${esc(e.category)}</td>
+                <td>${esc(e.description||'')}</td>
+                <td>${Number(e.quantity||1)}</td>
+                <td>${money(e.amount)}</td>
+                <td>
+                  <button class="btn small" onclick="expenseModal('${e.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('expenses','${e.id}')">Delete</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      `:'<div class="empty">No expenses in this month.</div>'}
+    </div>
+  `,'Expenses',`${ctOwnerMonthLabel()} studio costs`);
+}
+
