@@ -6701,3 +6701,79 @@ function operations(){
 }
 
 
+
+// ================= CORE THEORY — MONTH SELECTOR ONLY WHERE RELEVANT =================
+
+function ctPageUsesMonthSelector(){
+  if(!isOwner()) return false;
+
+  // Month-based reporting / management pages only.
+  return ['dashboard','finance','expenses','operations','team','reports'].includes(page);
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  const showMonth=ctPageUsesMonthSelector();
+
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+
+        <div class="role-chip">
+          ${esc(profile?.full_name||profile?.email||'')}
+          <small>${role}</small>
+        </div>
+
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              ${showMonth?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${showMonth?ctMonthPickerHtml():''}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
