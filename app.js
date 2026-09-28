@@ -7365,3 +7365,679 @@ function ctAddVariantToCart(productId,variantId){
   pos();
 }
 
+
+
+// ================= CORE THEORY — ADD PACKAGE: PAID / COMPLIMENTARY / PAYMENT PENDING =================
+
+function sellMembership(cid){
+  const memberships=packageSortForClient(db.memberships||[]);
+  modal('Add package',`
+    <div class="form">
+      <div class="full">
+        <label>Package</label>
+        <select id="smid">
+          ${memberships.map(m=>`
+            <option value="${m.id}">
+              ${esc(packageDisplayName(m))}
+            </option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <label>How should this package be added?</label>
+
+        <div style="display:grid;gap:8px">
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="paid" checked onchange="ctPackagePaymentChoiceChanged()">
+            <b> Paid</b>
+            <div class="muted">Collect payment now, record revenue, and activate / queue the package.</div>
+          </label>
+
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="complimentary" onchange="ctPackagePaymentChoiceChanged()">
+            <b> Complimentary</b>
+            <div class="muted">Give the package for free. No revenue is recorded.</div>
+          </label>
+
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="pending" onchange="ctPackagePaymentChoiceChanged()">
+            <b> Payment Pending</b>
+            <div class="muted">Do not activate it yet. It appears in Pending Package Orders until payment is collected.</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="full" id="ctPaidMethodBox">
+        <label>Payment method</label>
+        <select id="ctPaidMethod">
+          <option>Cash</option>
+          <option>Card</option>
+          <option>Whish</option>
+          <option>Transfer</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" id="ctAddPackageBtn" onclick="confirmMembership('${cid}')">
+          Add package
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctPackagePaymentChoiceChanged(){
+  const choice=document.querySelector('input[name="ctPackagePaymentStatus"]:checked')?.value||'paid';
+  const box=$("#ctPaidMethodBox");
+  if(box)box.style.display=choice==='paid'?'block':'none';
+}
+
+async function confirmMembership(cid){
+  const membershipId=$("#smid")?.value;
+  const m=db.memberships.find(x=>String(x.id)===String(membershipId));
+  if(!m)return alert('Choose a package.');
+
+  const choice=document.querySelector('input[name="ctPackagePaymentStatus"]:checked')?.value||'paid';
+  const btn=$("#ctAddPackageBtn");
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Processing…';
+  }
+
+  if(choice==='paid'){
+    const method=$("#ctPaidMethod")?.value||'Cash';
+
+    const {error}=await sb.rpc('complete_pos_sale',{
+      p_client_id:String(cid),
+      p_payment_method:method,
+      p_items:[{
+        id:String(m.id),
+        name:m.name,
+        price:Number(m.price||0),
+        kind:'membership'
+      }]
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Payment recorded and package added.');
+  }
+
+  if(choice==='complimentary'){
+    const ok=confirm(`Give ${m.name} to this client as a complimentary package?\n\nNo revenue will be recorded.`);
+    if(!ok){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return;
+    }
+
+    const {error}=await sb.rpc('owner_apply_membership',{
+      p_client_id:String(cid),
+      p_membership_id:String(m.id)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Complimentary package added. No revenue was recorded.');
+  }
+
+  if(choice==='pending'){
+    const {error}=await sb.rpc('owner_create_pending_package_order',{
+      p_client_id:String(cid),
+      p_membership_id:String(m.id)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Package marked Payment Pending. It has not been activated and no revenue was recorded.');
+  }
+}
+
+
+// Client profile: Pending orders now appear inside Packages as Payment Pending.
+function clientProfile(id,tab='overview'){
+  const c=db.clients.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  const bookings=db.bookings.filter(b=>String(b.client_id)===String(id));
+
+  const packages=db.client_packages
+    .filter(p=>String(p.client_id)===String(id))
+    .sort((a,b)=>String(b.purchased_at||'').localeCompare(String(a.purchased_at||'')));
+
+  const pendingOrders=(db.package_orders||[])
+    .filter(o=>String(o.client_id)===String(id)&&o.status==='pending')
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const payments=db.sales
+    .filter(s=>String(s.client_id)===String(id))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const notes=db.client_notes
+    .filter(n=>String(n.client_id)===String(id))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const visits=bookings.filter(b=>b.status==='checked_in').length;
+
+  const tabs=`
+    <div class="schedule-tabs">
+      <button class="tab ${tab==='overview'?'active':''}" onclick="clientProfile('${id}','overview')">Overview</button>
+      <button class="tab ${tab==='packages'?'active':''}" onclick="clientProfile('${id}','packages')">Packages</button>
+      <button class="tab ${tab==='attendance'?'active':''}" onclick="clientProfile('${id}','attendance')">Attendance</button>
+      <button class="tab ${tab==='payments'?'active':''}" onclick="clientProfile('${id}','payments')">Payments</button>
+      <button class="tab ${tab==='notes'?'active':''}" onclick="clientProfile('${id}','notes')">Notes</button>
+    </div>`;
+
+  let body='';
+
+  if(tab==='overview'){
+    body=`
+      <div class="grid two">
+        <div>
+          <p><b>Email:</b> ${esc(c.email||'—')}</p>
+          <p><b>Phone:</b> ${esc(c.phone||'—')}</p>
+          <p><b>Birthday:</b> ${esc(c.birthday||'—')}</p>
+          <p><b>Emergency:</b> ${esc(c.emergency_contact_name||'—')} ${esc(c.emergency_contact_phone||'')}</p>
+          <p><b>Waiver:</b> ${c.waiver_accepted_at?'Accepted '+new Date(c.waiver_accepted_at).toLocaleDateString():'Not recorded'}</p>
+        </div>
+        <div>
+          <p><b>Current package:</b> ${esc(c.package||'—')}</p>
+          <p><b>Sessions:</b> ${c.sessions??0}</p>
+          <p><b>Expiry:</b> ${esc(c.expiry||'—')}</p>
+          <p><b>Total visits:</b> ${visits}</p>
+          <p><b>Payment pending:</b> ${pendingOrders.length}</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn" onclick="clientModal('${id}')">Edit client</button>
+        <button class="btn" onclick="sellMembership('${id}')">Add package</button>
+        <button class="btn" onclick="sessionAdjustmentModal('${id}')">Adjust sessions</button>
+        <button class="btn" onclick="freezeClientModal('${id}')">Freeze</button>
+      </div>`;
+  }
+
+  if(tab==='packages'){
+    const pendingHtml=pendingOrders.map(o=>{
+      const m=db.memberships.find(x=>String(x.id)===String(o.membership_id));
+      return `
+        <div class="cart-row">
+          <span>
+            <b>${esc(m?.name||'Package')}</b>
+            <small>
+              <span class="badge warning">Payment Pending</span>
+              · ${esc(m?.studio_scope||'Both')}
+              · ${m?.sessions===999?'Unlimited':`${m?.sessions??'—'} sessions`}
+            </small>
+          </span>
+          <span>
+            <b>${money(o.amount)}</b>
+            <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button>
+            <button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change</button>
+            <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button>
+          </span>
+        </div>`;
+    }).join('');
+
+    const packageHtml=packages.map(p=>`
+      <div class="cart-row">
+        <span>
+          <b>${esc(p.package_name)}</b>
+          <small>
+            ${esc(p.status)}
+            · ${p.sessions_remaining===999?'Unlimited':p.sessions_remaining+' / '+p.sessions_total+' left'}
+            · ${esc(p.studio_scope||'Both')}
+            · ${p.expiry||'No expiry'}
+          </small>
+        </span>
+        <span>
+          ${p.price_paid!=null?money(p.price_paid):''}
+          ${p.status==='upcoming'&&p.sessions_remaining===p.sessions_total
+            ?` <button class="btn small" onclick="transferPackageModal('${p.id}')">Transfer</button>`
+            :''}
+        </span>
+      </div>`).join('');
+
+    body=(pendingHtml+packageHtml)||'<div class="empty">No package history.</div>';
+  }
+
+  if(tab==='attendance'){
+    body=bookings.map(b=>{
+      const cl=db.classes.find(x=>String(x.id)===String(b.class_id));
+      return `
+        <div class="cart-row">
+          <span>
+            <b>${esc(cl?.class_type||'Class')}</b>
+            <small>${esc(cl?.class_date||'')} · ${esc(cl?.studio_type||'')}</small>
+          </span>
+          <span class="badge">${esc(b.cancel_type||b.status)}</span>
+        </div>`;
+    }).join('')||'<div class="empty">No attendance history.</div>';
+  }
+
+  if(tab==='payments'){
+    body=payments.map(s=>`
+      <div class="cart-row">
+        <span>
+          <b>${esc(saleWhat(s))}</b>
+          <small>${new Date(s.created_at).toLocaleString()} · ${esc(s.payment_method||'')}${s.voided_at?' · VOIDED':''}</small>
+        </span>
+        <span>
+          <b>${money(s.total)}</b>
+          <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+        </span>
+      </div>`).join('')||'<div class="empty">No payment history.</div>';
+  }
+
+  if(tab==='notes'){
+    body=`
+      <div class="toolbar">
+        <button class="btn primary" onclick="clientNoteModal('${id}')">+ Add note</button>
+      </div>
+      ${notes.map(n=>`
+        <div class="cart-row">
+          <span>
+            <b>${esc(n.category)}</b>
+            ${n.teaching_visible?' <span class="badge">Instructor-visible</span>':''}
+            <small>${esc(n.note)}</small>
+            <small>${new Date(n.created_at).toLocaleString()}</small>
+          </span>
+          <button class="btn small danger" onclick="removeItem('client_notes','${n.id}')">Delete</button>
+        </div>`).join('')||'<div class="empty">No notes.</div>'}`;
+  }
+
+  modal(esc(c.name),tabs+`<div style="margin-top:14px">${body}</div>`);
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10 — FINAL STABLE OVERRIDES
+// ============================================================================
+
+const CORE_THEORY_VERSION='10.0';
+
+function ctPendingForClient(clientId){
+  return (db.package_orders||[]).find(o =>
+    String(o.client_id)===String(clientId) && o.status==='pending'
+  ) || null;
+}
+
+// ---------------- CLIENT PACKAGE PURCHASE = PAYMENT PENDING ----------------
+
+function packageRequestModal(id){
+  const m=db.memberships.find(x=>String(x.id)===String(id));
+  const c=myClient();
+  if(!m||!c)return;
+
+  const pending=ctPendingForClient(c.id);
+
+  modal(pending?'Change pending package':'Confirm package',`
+    ${packageSummaryHtml(m)}
+
+    ${pending?`
+      <div class="warning" style="margin-bottom:12px">
+        <b>You already have a Payment Pending package.</b>
+        <p>Choosing this package will replace your unpaid package choice.</p>
+      </div>
+    `:''}
+
+    <label>Coupon code <span class="muted">(optional)</span></label>
+    <input id="requestCoupon" placeholder="Enter coupon code">
+
+    <button class="btn primary full" onclick="requestPackage('${m.id}')">
+      ${pending?'Change pending package':'Request package'}
+    </button>
+
+    ${pending?`
+      <button class="btn danger full" onclick="clientCancelPendingPackage('${pending.id}')">
+        Cancel pending package
+      </button>
+    `:''}
+
+    <button class="btn full" onclick="$('#modal').remove()">Go back</button>
+
+    <p class="muted">
+      Package requests from a client account are always <b>Payment Pending</b>.
+      They do not activate and do not count as revenue until Core Theory collects payment.
+    </p>
+  `);
+}
+
+async function requestPackage(id){
+  const c=myClient();
+  if(!c)return alert('Client account not found.');
+
+  const code=($("#requestCoupon")?.value||'').trim();
+  const pending=ctPendingForClient(c.id);
+
+  if(pending){
+    const {error}=await sb.rpc('client_change_my_pending_package',{
+      p_order_id:String(pending.id),
+      p_membership_id:String(id)
+    });
+
+    if(error)return alert(error.message);
+
+    $("#modal")?.remove();
+    await loadAll();
+    page='packages';
+    packages();
+    return alert('Pending package changed. No payment was recorded.');
+  }
+
+  const {data,error}=await sb.rpc('request_package_order_v2',{
+    p_membership_id:String(id),
+    p_coupon_code:code||null
+  });
+
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='packages';
+  packages();
+
+  alert(
+    data?.discount_percent
+      ? `Package request sent. ${data.discount_percent}% promo applied. Payment is pending.`
+      : 'Package request sent. Payment is pending.'
+  );
+}
+
+async function clientCancelPendingPackage(orderId){
+  if(!confirm('Cancel this unpaid package request?'))return;
+
+  const {error}=await sb.rpc('client_cancel_my_pending_package',{
+    p_order_id:String(orderId)
+  });
+
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='packages';
+  packages();
+  alert('Pending package cancelled.');
+}
+
+function packages(){
+  const c=myClient();
+  const scope=clientPackageTab;
+  const list=packageSortForClient(
+    db.memberships.filter(m=>(m.studio_scope||'Both')===scope)
+  );
+
+  const pending=ctPendingForClient(c?.id);
+  const pendingMembership=pending
+    ?db.memberships.find(m=>String(m.id)===String(pending.membership_id))
+    :null;
+
+  layout(`
+    ${pending?`
+      <div class="warning card" style="margin-bottom:14px">
+        <b>Payment Pending</b>
+        <p>
+          ${esc(pendingMembership?.name||'Package')} · ${money(pending.amount)}
+          ${pending.coupon_code?` · Promo ${esc(pending.coupon_code)}`:''}
+        </p>
+        <div class="toolbar">
+          <button class="btn danger" onclick="clientCancelPendingPackage('${pending.id}')">
+            Cancel request
+          </button>
+        </div>
+        <p class="muted">
+          This package is not active yet and no revenue has been recorded.
+        </p>
+      </div>
+    `:''}
+
+    <div class="schedule-tabs package-scope-tabs">
+      ${packageTabButton('Pilates','Pilates')}
+      ${packageTabButton('Megacore','Megacore')}
+      ${packageTabButton('Both','Mix')}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid three">
+      ${list.map(m=>`
+        <div class="card package-card">
+          <div class="toolbar">
+            <span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>
+            ${m.is_private?'<span class="badge">Private</span>':''}
+          </div>
+          <h3>${esc(m.name)}</h3>
+          <div class="package-price">${money(m.price)}</div>
+          <p><b>${m.sessions===999?'Unlimited':m.sessions+' sessions'}</b> · ${m.validity_days} days</p>
+          <button class="btn primary" onclick="packageRequestModal('${m.id}')">
+            ${pending?'Choose instead':'Choose package'}
+          </button>
+        </div>
+      `).join('')||'<div class="card empty">No packages available.</div>'}
+    </div>
+
+    <div class="card notice">
+      <b>Pay at Core Theory</b>
+      <p>
+        Choosing a package creates a Payment Pending request.
+        It activates only after payment is collected.
+      </p>
+    </div>
+  `,
+  `Packages · ${scope==='Both'?'Mix':scope}`,
+  `Current package: ${esc(c?.package||'None')} · ${c?.sessions??0} sessions remaining`);
+}
+
+
+// ---------------- EXACT PRODUCT VARIANT ON SALE HISTORY / RECEIPT ----------------
+
+function v10SaleItemLabel(item){
+  const name=String(item?.name||item?.kind||'Item');
+  if(item?.variant_name && !name.includes(item.variant_name)){
+    return `${name} · ${item.variant_name}`;
+  }
+  return name;
+}
+
+function saleWhat(s){
+  if(s.description)return s.description;
+  const items=Array.isArray(s?.items)?s.items:[];
+  return items.map(v10SaleItemLabel).join(', ')||'Payment';
+}
+
+function printReceipt(id){
+  const s=db.sales.find(x=>String(x.id)===String(id));
+  if(!s)return;
+
+  const c=db.clients.find(x=>String(x.id)===String(s.client_id));
+  const w=window.open('','_blank','width=520,height=700');
+
+  if(!w)return alert('Allow pop-ups to print the receipt.');
+
+  const items=(Array.isArray(s.items)?s.items:[])
+    .map(i=>`<div class="row"><span>Item</span><b>${esc(v10SaleItemLabel(i))}</b></div>`)
+    .join('');
+
+  w.document.write(`
+    <html>
+      <head>
+        <title>Core Theory Receipt</title>
+        <style>
+          body{font-family:Arial;padding:32px;color:#222}
+          h1{letter-spacing:2px}
+          .row{display:flex;justify-content:space-between;gap:18px;border-bottom:1px solid #ddd;padding:9px 0}
+          .muted{color:#666}
+        </style>
+      </head>
+      <body>
+        <h1>CORE THEORY</h1>
+        <p class="muted">Payment receipt</p>
+        <div class="row"><span>Client</span><b>${esc(c?.name||'Walk-in')}</b></div>
+        ${items||`<div class="row"><span>Paid for</span><b>${esc(saleWhat(s))}</b></div>`}
+        <div class="row"><span>Amount</span><b>${money(s.total)}</b></div>
+        <div class="row"><span>Method</span><b>${esc(s.payment_method||'')}</b></div>
+        <div class="row"><span>Date</span><b>${new Date(s.created_at).toLocaleString()}</b></div>
+        ${s.voided_at?'<p><b>VOIDED / REFUNDED</b></p>':''}
+        <script>window.onload=()=>window.print()<\/script>
+      </body>
+    </html>
+  `);
+
+  w.document.close();
+}
+
+
+// ---------------- REFUND / CORRECTION ----------------
+
+function refundSaleModal(id){
+  const s=db.sales.find(x=>String(x.id)===String(id));
+  if(!s)return;
+  if(s.voided_at)return alert('This payment is already voided/refunded.');
+
+  modal('Refund payment',`
+    <div class="warning" style="margin-bottom:12px">
+      <b>Full refund</b>
+      <p>
+        Core Theory will reverse linked product stock and remove the sale from revenue.
+        If a linked package has already been used, the refund is blocked to protect sessions.
+      </p>
+    </div>
+
+    <p><b>${esc(saleClientName(s))}</b></p>
+    <p>${esc(saleWhat(s))} · ${money(s.total)}</p>
+
+    <label>Reason</label>
+    <textarea id="v10RefundReason" rows="4" placeholder="Reason for refund"></textarea>
+
+    <button class="btn danger full" id="v10RefundBtn" onclick="submitV10Refund('${s.id}')">
+      Confirm refund
+    </button>
+  `);
+}
+
+async function submitV10Refund(id){
+  const reason=$("#v10RefundReason")?.value.trim()||'';
+  if(!reason)return alert('Enter a refund reason.');
+  if(!confirm('Refund this transaction?'))return;
+
+  const btn=$("#v10RefundBtn");
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Processing…';
+  }
+
+  const {error}=await sb.rpc('v10_refund_sale',{
+    p_sale_id:String(id),
+    p_reason:reason
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Confirm refund';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='finance';
+  finance();
+  alert('Refund completed and kept in history.');
+}
+
+function renderPaymentHistory(query=''){
+  const box=$("#paymentHistoryRows");
+  if(!box)return;
+
+  const q=String(query||'').trim().toLowerCase();
+
+  const rows=[...db.sales]
+    .filter(s=>!isOwner()||!ownerMonth||ctInOwnerMonth(s.created_at))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))
+    .filter(s=>{
+      const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total,saleCollector(s)].join(' ').toLowerCase();
+      return !q||hay.includes(q);
+    });
+
+  box.innerHTML=rows.length?`
+    <div style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Date / time</th>
+            <th>Client</th>
+            <th>Paid for</th>
+            <th>Method</th>
+            <th>Amount</th>
+            <th>Recorded by</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s=>`
+            <tr>
+              <td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}</td>
+              <td><b>${esc(saleClientName(s))}</b></td>
+              <td>${esc(saleWhat(s))}</td>
+              <td>${esc(s.payment_method||'—')}</td>
+              <td>
+                <b>${money(s.total)}</b>
+                ${s.voided_at?'<div class="muted">Voided / Refunded</div>':''}
+              </td>
+              <td>${esc(saleCollector(s))}</td>
+              <td>
+                <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+                ${s.voided_at
+                  ?'<span class="badge">Voided / Refunded</span>'
+                  :`
+                    <button class="btn small" onclick="editSaleModal('${s.id}')">Correct</button>
+                    <button class="btn small danger" onclick="refundSaleModal('${s.id}')">Refund</button>
+                  `}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `:'<div class="empty">No sales in this month.</div>';
+}
+
+
+// ---------------- V10 STATUS HELPERS ----------------
+
+function v10PackageStatusLabel(status){
+  const s=String(status||'').toLowerCase();
+  const map={
+    pending:'Payment Pending',
+    active:'Active',
+    upcoming:'Upcoming',
+    expired:'Expired',
+    frozen:'Frozen',
+    used:'Used',
+    refunded:'Refunded',
+    cancelled:'Cancelled'
+  };
+  return map[s]||status||'—';
+}
+
+
