@@ -9021,3 +9021,403 @@ function guestEventModal(eventId){
 }
 
 
+
+// ============================================================================
+// CORE THEORY V10.0.6 — OWNER COMPLIMENTARY GUESTS
+// ============================================================================
+
+const ctV106BaseLoadAll = loadAll;
+
+loadAll = async function(){
+  await ctV106BaseLoadAll();
+
+  if(!session||!profile)return;
+
+  db.owner_comp_guests = db.owner_comp_guests || [];
+
+  if(isOwner()){
+    const {data,error}=await sb
+      .from('owner_comp_guests')
+      .select('*')
+      .order('created_at',{ascending:false});
+
+    if(!error)db.owner_comp_guests=data||[];
+  }else if(isInstructor()){
+    const {data,error}=await sb.rpc('my_owner_comp_guest_roster');
+    if(!error)db.owner_comp_guests=data||[];
+  }
+
+  render();
+};
+
+function ctOwnerCompGuestsForClass(classId){
+  return (db.owner_comp_guests||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+}
+
+function ctClassOccupiedCountIncludingGuests(classId){
+  const normal=(db.bookings||[]).filter(b=>
+    String(b.class_id)===String(classId) &&
+    !['cancelled','waitlist'].includes(b.status)
+  ).length;
+
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    !['cancelled','waitlist'].includes(g.status)
+  ).length;
+
+  const ownerGuests=ctOwnerCompGuestsForClass(classId)
+    .filter(g=>g.status!=='waitlist').length;
+
+  return normal+eventGuests+ownerGuests;
+}
+
+function classCheckedInCount(c){
+  return db.bookings.filter(b=>
+    String(b.class_id)===String(c.id) &&
+    b.status==='checked_in'
+  ).length
+  +(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(c.id) &&
+    g.status==='checked_in'
+  ).length
+  +ctOwnerCompGuestsForClass(c.id).filter(g=>
+    g.status==='checked_in'
+  ).length;
+}
+
+function ownerAddGuestModal(classId){
+  if(!isOwner())return;
+
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return alert('Class not found.');
+
+  const occupied=ctClassOccupiedCountIncludingGuests(classId);
+  const capacity=Number(c.capacity||0);
+  const full=occupied>=capacity;
+
+  modal('Add free guest',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(c.class_type||'Class')}</b>
+      <p class="muted">
+        ${esc(c.class_date)} · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+        · ${esc(c.studio_type||'Pilates')}
+      </p>
+      <p>
+        <b>${occupied}/${capacity}</b> spots currently used
+      </p>
+    </div>
+
+    ${full?`
+      <div class="warning" style="margin-bottom:12px">
+        This class is currently full. You can still add the guest only if you explicitly allow over-capacity.
+      </div>
+    `:''}
+
+    <label>Guest full name</label>
+    <input id="ownerGuestName" placeholder="Guest full name" autocomplete="name">
+
+    <label>Guest phone</label>
+    <input id="ownerGuestPhone" type="tel" placeholder="Guest phone number" autocomplete="tel">
+
+    <label>Note <span class="muted">(optional)</span></label>
+    <input id="ownerGuestNote" placeholder="e.g. Owner invite, influencer, trial guest">
+
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
+      <input id="ownerGuestOverride" type="checkbox" style="width:auto;margin-top:3px">
+      <span>
+        <b>Allow over capacity</b>
+        <small class="muted" style="display:block">
+          Use only when you intentionally want this guest added even if the class is full.
+        </small>
+      </span>
+    </label>
+
+    <button class="btn primary full" id="ownerGuestSaveBtn" onclick="ownerSaveFreeGuest('${classId}')">
+      Add guest for free
+    </button>
+
+    <p class="muted">
+      No package, session, payment or revenue is created. The guest appears in Bookings and in the class roster.
+    </p>
+  `);
+}
+
+async function ownerSaveFreeGuest(classId){
+  if(!isOwner())return;
+
+  const name=($("#ownerGuestName")?.value||'').trim();
+  const phone=($("#ownerGuestPhone")?.value||'').trim();
+  const note=($("#ownerGuestNote")?.value||'').trim();
+  const allowOverCapacity=$("#ownerGuestOverride")?.checked===true;
+
+  if(!name)return alert('Enter the guest’s full name.');
+  if(!phone)return alert('Enter the guest’s phone number.');
+
+  const btn=$("#ownerGuestSaveBtn");
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Adding guest…';
+  }
+
+  const {error}=await sb.rpc('owner_add_free_guest',{
+    p_class_id:String(classId),
+    p_guest_name:name,
+    p_guest_phone:phone,
+    p_note:note||null,
+    p_allow_over_capacity:allowOverCapacity
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Add guest for free';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  openClass(classId);
+  alert('Guest added for free.');
+}
+
+async function checkInOwnerGuest(id){
+  const {error}=await sb.rpc('check_in_owner_free_guest',{
+    p_guest_booking_id:String(id)
+  });
+
+  if(error)return alert(error.message);
+
+  await loadAll();
+  alert('Guest checked in.');
+}
+
+async function cancelOwnerFreeGuest(id,classId){
+  if(!isOwner())return;
+  if(!confirm('Remove this complimentary guest from the class?'))return;
+
+  const {error}=await sb.rpc('cancel_owner_free_guest',{
+    p_guest_booking_id:String(id)
+  });
+
+  if(error)return alert(error.message);
+
+  await loadAll();
+  openClass(classId);
+}
+
+function openClass(id){
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  const bs=activeBookings(id);
+
+  const eventGuests=isOwner()
+    ?(db.guest_bookings||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled')
+    :(db.guestRoster||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled');
+
+  const ownerGuests=ctOwnerCompGuestsForClass(id);
+
+  const checked=
+    bs.filter(b=>b.status==='checked_in').length+
+    eventGuests.filter(g=>g.status==='checked_in').length+
+    ownerGuests.filter(g=>g.status==='checked_in').length;
+
+  const noShows=
+    bs.filter(b=>b.status==='no_show').length+
+    eventGuests.filter(g=>g.status==='no_show').length+
+    ownerGuests.filter(g=>g.status==='no_show').length;
+
+  const wait=
+    bs.filter(b=>b.status==='waitlist').length+
+    eventGuests.filter(g=>g.status==='waitlist').length;
+
+  const pending=bs.filter(b=>b.payment_status==='pending').length;
+  const notes=teachingNotesForClass(id);
+
+  const rows=bs.map(b=>{
+    const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id));
+    const cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null;
+    const clientName=cl?.name||roster?.client_name||'Client';
+    const n=notes.filter(x=>String(x.client_id)===String(b.client_id));
+
+    return `
+      <div class="booking-person">
+        <span>
+          <b>${esc(clientName)}</b>
+          <small>
+            ${esc(b.status)} ·
+            ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}
+          </small>
+          ${n.map(x=>`<small>⚑ ${esc(x.category)}: ${esc(x.note)}</small>`).join('')}
+        </span>
+
+        ${isStaff()?`
+          <span>
+            ${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}
+            <button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button>
+            ${isOwner()&&b.payment_status==='pending'&&!b.package_order_id
+              ?` <button class="btn small primary" onclick="manualOwnerBookingPayment('${b.id}',decodeURIComponent('${encodeURIComponent(clientName)}'))">Add package / collect</button>`
+              :''}
+          </span>
+        `:''}
+      </div>`;
+  }).join('');
+
+  const eventGuestRows=eventGuests.map(g=>`
+    <div class="booking-person">
+      <span>
+        <b>${esc(g.guest_name||'Guest')}</b>
+        <small>
+          Event guest · ${esc(g.status)}
+          ${g.host_name?' · invited by '+esc(g.host_name):''}
+        </small>
+      </span>
+      ${isStaff()&&g.status==='booked'
+        ?`<button class="btn small" onclick="checkInGuest('${g.booking_id||g.id}')">Check in guest</button>`
+        :''}
+    </div>
+  `).join('');
+
+  const ownerGuestRows=ownerGuests.map(g=>`
+    <div class="booking-person">
+      <span>
+        <b>${esc(g.guest_name||'Guest')}</b>
+        <small>
+          Complimentary guest · ${esc(g.status)}
+          ${g.note?' · '+esc(g.note):''}
+        </small>
+        ${isOwner()&&g.guest_phone?`<small>${esc(g.guest_phone)}</small>`:''}
+      </span>
+
+      <span>
+        ${(isOwner()||isInstructor())&&g.status==='booked'
+          ?`<button class="btn small" onclick="checkInOwnerGuest('${g.id}')">Check in</button>`
+          :''}
+        ${isOwner()
+          ?`<button class="btn small danger" onclick="cancelOwnerFreeGuest('${g.id}','${c.id}')">Remove</button>`
+          :''}
+      </span>
+    </div>
+  `).join('');
+
+  const total=bs.length+eventGuests.length+ownerGuests.length;
+
+  modal(
+    `${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,
+    `
+      <p>
+        <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+        ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}
+      </p>
+
+      <div class="grid three">
+        <div class="card kpi">
+          <div class="label">Booked</div>
+          <div class="value">${total}</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Checked in</div>
+          <div class="value">${checked}</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Waitlist</div>
+          <div class="value">${wait}</div>
+        </div>
+      </div>
+
+      <p class="muted">
+        No-shows: ${noShows} · Payment pending: ${pending} · Capacity: ${c.capacity||0}
+      </p>
+
+      ${rows}
+      ${eventGuestRows}
+      ${ownerGuestRows}
+
+      ${!rows&&!eventGuestRows&&!ownerGuestRows
+        ?'<div class="empty">No bookings yet.</div>'
+        :''}
+
+      ${isOwner()?`
+        <div class="toolbar">
+          <button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button>
+          <button class="btn" onclick="ownerAddGuestModal('${c.id}')">+ Add free guest</button>
+          <button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button>
+          <button class="btn" onclick="substituteClassModal('${c.id}')">Substitute</button>
+        </div>
+      `:''}
+    `
+  );
+}
+
+function ctGuestBookingsForClass(classId){
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+
+  return [...eventGuests,...ctOwnerCompGuestsForClass(classId)];
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+  const ownerGuests=ctOwnerCompGuestsForClass(classId);
+  const guests=[...eventGuests,...ownerGuests];
+
+  return {
+    total:rows.length+guests.length,
+    clientTotal:rows.length,
+    guestTotal:guests.length,
+    booked:rows.filter(b=>b.status==='booked').length
+      +guests.filter(g=>g.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length
+      +guests.filter(g=>g.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length
+      +guests.filter(g=>g.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+      +guests.filter(g=>g.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const clientNames=activeBookings(classId).map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+
+  const eventGuestNames=(db.guest_bookings||[])
+    .filter(g=>String(g.class_id)===String(classId)&&g.status!=='cancelled')
+    .map(g=>{
+      const guest=(db.guest_profiles||[]).find(x=>
+        String(x.id)===String(g.guest_id||g.guest_profile_id||'')
+      );
+      const name=g.guest_name||guest?.name||guest?.full_name||'Guest';
+      const host=g.host_name||guest?.host_name||'';
+      return `Guest: ${name}${host?` · invited by ${host}`:''}`;
+    });
+
+  const ownerGuestNames=ctOwnerCompGuestsForClass(classId)
+    .map(g=>`Guest: ${g.guest_name} · complimentary`);
+
+  const names=[...clientNames,...eventGuestNames,...ownerGuestNames];
+
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.7 — EVENT PAIR BOOKING SAFETY
+// The server now verifies the CLIENT booking exists before creating the guest.
+// This prevents a guest-only event reservation.
+// ============================================================================
