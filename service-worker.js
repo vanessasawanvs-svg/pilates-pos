@@ -1,5 +1,5 @@
-const CACHE='core-theory-v10-0-8';
-const STATIC_ASSETS=['./','./styles.css','./manifest.json','./offline.html'];
+const CACHE='core-theory-v10-0-9';
+const STATIC_ASSETS=['./styles.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{
   self.skipWaiting();
@@ -20,15 +20,10 @@ self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET')return;
 
   const url=new URL(event.request.url);
-  const isAppJs=url.pathname.endsWith('/app.js');
-  const isIndex=url.pathname.endsWith('/index.html') || url.pathname==='/' || url.pathname.endsWith('/');
-  const isServiceWorker=url.pathname.endsWith('/service-worker.js');
+  const isJS=url.pathname.endsWith('.js');
+  const isHTML=url.pathname.endsWith('.html') || url.pathname==='/' || url.pathname.endsWith('/');
 
-  if(isServiceWorker){
-    return;
-  }
-
-  if(isAppJs || isIndex){
+  if(isJS || isHTML){
     event.respondWith(
       fetch(event.request,{cache:'no-store'}).catch(()=>caches.match(event.request))
     );
@@ -42,6 +37,6 @@ self.addEventListener('fetch',event=>{
         caches.open(CACHE).then(cache=>cache.put(event.request,copy));
         return response;
       })
-      .catch(()=>caches.match(event.request).then(r=>r||caches.match('./offline.html')))
+      .catch(()=>caches.match(event.request))
   );
 });
