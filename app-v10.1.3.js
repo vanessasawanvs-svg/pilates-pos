@@ -1,0 +1,10086 @@
+const SUPABASE_URL="https://cwehahuxcupodqklxaal.supabase.co";
+const SUPABASE_KEY="sb_publishable_0dVqqdCdDrFgqRfh7E1DvQ_uhJvj1Bh";
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=s=>document.querySelector(s), money=n=>`$${Number(n||0).toFixed(2)}`, today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
+const esc=(s="")=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+let db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[]};
+let session=null,profile=null,page="dashboard",cart=[],scheduleWeekOffset=0,studioTab="Pilates",selectedSaleClient=null,posPackageTab="Pilates",posPromo=null;
+const isOwner=()=>profile?.role==="owner",isInstructor=()=>profile?.role==="instructor",isReceptionist=()=>profile?.role==="receptionist",isClient=()=>profile?.role==="client",isStaff=()=>isOwner()||isInstructor(),isFrontDeskStaff=()=>isInstructor()||isReceptionist();
+const sortedMemberships=(arr=db.memberships)=>[...(arr||[])].filter(x=>!x.archived_at).sort((a,b)=>(Number(a.sort_order||0)-Number(b.sort_order||0))||String(a.name||'').localeCompare(String(b.name||'')));
+const PHONE_COUNTRIES=[['Lebanon','+961'],['France','+33'],['United Arab Emirates','+971'],['Kuwait','+965'],['Saudi Arabia','+966'],['Qatar','+974'],['Bahrain','+973'],['Jordan','+962'],['Egypt','+20'],['Cyprus','+357'],['Greece','+30'],['Italy','+39'],['Spain','+34'],['Portugal','+351'],['Germany','+49'],['United Kingdom','+44'],['Ireland','+353'],['Switzerland','+41'],['Belgium','+32'],['Netherlands','+31'],['Sweden','+46'],['Norway','+47'],['Denmark','+45'],['Austria','+43'],['United States / Canada','+1'],['Australia','+61'],['New Zealand','+64'],['Turkey','+90'],['Armenia','+374'],['Georgia','+995'],['Iraq','+964'],['Oman','+968'],['Morocco','+212'],['Tunisia','+216'],['Algeria','+213'],['South Africa','+27'],['India','+91'],['Philippines','+63'],['Other','']];
+const countryOptions=()=>PHONE_COUNTRIES.map(([n,c])=>`<option value="${c}" ${c==='+961'?'selected':''}>${n}${c?' ('+c+')':''}</option>`).join('');
+
+
+function authScreen(msg=""){$("#app").innerHTML=`<div class="auth-shell"><div class="auth-card"><div class="auth-brand">CORE THEORY<small>PILATES · MEGACORE</small></div><h2>Sign in</h2><form id="loginForm"><label>Email</label><input id="loginEmail" type="email" required><label>Password</label><input id="loginPassword" type="password" required><button class="btn primary full" type="submit">Sign in</button><div class="auth-error" id="authError">${esc(msg)}</div></form><div class="auth-links"><button class="link-btn" onclick="forgotPassword()">Forgot password?</button><button class="link-btn" onclick="signupScreen()">New client? Create account</button></div></div></div>`;$("#loginForm").onsubmit=login}
+async function login(e){e.preventDefault();$("#authError").textContent="Signing in…";const {data,error}=await sb.auth.signInWithPassword({email:$("#loginEmail").value.trim(),password:$("#loginPassword").value});if(error)return $("#authError").textContent=error.message;session=data.session;await loadAll()}
+function signupScreen(msg=""){$("#app").innerHTML=`<div class="auth-shell"><div class="auth-card"><div class="auth-brand">CORE THEORY<small>CLIENT ACCOUNT</small></div><h2>Create account</h2><form id="signupForm"><label>Full name</label><input id="suName" required><label>Email</label><input id="suEmail" type="email" required><label>Country / calling code</label><select id="suCountry" required>${countryOptions()}</select><label>Phone number</label><input id="suPhone" type="tel" placeholder="e.g. 70123456" required><small class="muted">Choose your country first. Core Theory saves the full international number.</small><label>Password</label><input id="suPass" type="password" minlength="8" required><button class="btn primary full" type="submit">Create account</button><div class="auth-error" id="authError">${esc(msg)}</div></form><button class="link-btn" onclick="authScreen()">← Back to sign in</button></div></div>`;$("#signupForm").onsubmit=signup}
+async function signup(e){e.preventDefault();const code=$("#suCountry").value.trim(),raw=$("#suPhone").value.trim().replace(/^0+/,'').replace(/\s+/g,'');if(!code)return $("#authError").textContent="Please choose a country with a calling code.";if(!raw)return $("#authError").textContent="Phone number is required.";const phone=code+raw;const {error}=await sb.auth.signUp({email:$("#suEmail").value.trim(),password:$("#suPass").value,options:{emailRedirectTo:location.origin,data:{full_name:$("#suName").value.trim(),phone,phone_country_code:code}}});if(error)return $("#authError").textContent=error.message;authScreen("Account created. Check your email to confirm, then sign in.")}
+async function forgotPassword(){const email=prompt("Enter your Core Theory email:");if(!email)return;const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin});alert(error?error.message:"Password reset email sent.")}
+function setPasswordScreen(){$("#app").innerHTML=`<div class="auth-shell"><div class="auth-card"><div class="auth-brand">CORE THEORY<small>SECURE ACCOUNT</small></div><h2>Create your password</h2><p class="muted">Choose the password you'll use to sign in.</p><form id="pwForm"><label>New password</label><input id="pw1" type="password" minlength="8" required><label>Confirm password</label><input id="pw2" type="password" minlength="8" required><button class="btn primary full" type="submit">Save password</button><div class="auth-error" id="authError"></div></form></div></div>`;$("#pwForm").onsubmit=savePassword}
+async function savePassword(e){e.preventDefault();if($("#pw1").value!==$("#pw2").value)return $("#authError").textContent="Passwords do not match.";const {error}=await sb.auth.updateUser({password:$("#pw1").value});if(error)return $("#authError").textContent=error.message;history.replaceState({},document.title,location.pathname);await loadAll()}
+async function logout(){await sb.auth.signOut();session=null;profile=null;authScreen()}
+
+async function loadAll(){
+if(!session)return authScreen();$("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(pr.error)return authScreen("Profile error: "+pr.error.message);profile=pr.data;if(!profile)return authScreen("This account does not have a Core Theory profile yet.");if(isClient()){await sb.rpc("ensure_client_record");await sb.rpc("issue_my_birthday_reward");}if(isOwner()){await sb.rpc('process_today_birthdays');}const tables=isOwner()?['clients','memberships','products','sales','expenses','classes','team','bookings','class_levels','package_orders','notification_settings','notification_queue','studio_settings','announcements','promo_codes','custom_sections','custom_entries','audit_log','instructor_availability','instructor_class_slots','client_packages','class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings','client_notes','package_freezes','payroll_adjustments','client_notifications']:isInstructor()?['classes','bookings','class_levels','announcements','studio_events','client_notes']:isReceptionist()?[]:['clients','memberships','classes','bookings','class_levels','package_orders','announcements','client_packages','client_rewards','studio_events','client_notifications'];db={clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],client_notifications:[],roster:[],guestRoster:[]};const rs=await Promise.all(tables.map(t=>sb.from(t).select("*")));const bad=rs.find(x=>x.error);if(bad)return authScreen("Database error: "+bad.error.message);tables.forEach((t,i)=>db[t]=rs[i].data||[]);if(isClient()){const cp=await sb.rpc('client_payment_history');if(!cp.error)db.client_payments=cp.data||[]}if(isInstructor()){const [rr,mc,gr]=await Promise.all([sb.rpc('my_instructor_roster'),sb.rpc('my_instructor_classes_v2'),sb.rpc('my_instructor_guest_roster')]);if(rr.error)return authScreen('Schedule access error: '+rr.error.message);if(mc.error)return authScreen('Schedule access error: '+mc.error.message);db.roster=rr.data||[];db.classes=mc.data||[];db.guestRoster=gr.error?[]:(gr.data||[]);}if(isClient()||isInstructor()){
+  const subs=await sb.rpc('visible_active_class_substitutions');
+  if(!subs.error)db.class_substitutions=subs.data||[];
+}
+if(isFrontDeskStaff()){const fd=await sb.rpc('is_front_desk_on_duty');db.frontDeskDuty=fd.data===true;if(db.frontDeskDuty){const [fr,fm,fp,fc]=await Promise.all([sb.rpc('front_desk_today'),sb.rpc('front_desk_memberships_v2'),sb.rpc('front_desk_products'),sb.rpc('front_desk_booking_classes',{p_days:14})]);if(!fr.error)db.frontDeskToday=fr.data||[];if(!fm.error)db.frontDeskMemberships=fm.data||[];if(!fp.error)db.frontDeskProducts=fp.data||[];if(!fc.error)db.frontDeskBookingClasses=fc.data||[];}}if(isInstructor()){const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page='instructorhome';}if(isReceptionist()){const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';}if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page))page='clienthome';render()}
+function nav(){const pages=isOwner()?['dashboard','clients','schedule','pos','memberships','inventory','expenses','finance','team','operations','settings']:isInstructor()?['instructorhome','schedule',...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:isReceptionist()?[...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']:['clienthome','book','mybookings','packages','clientaccount'];const labels={dashboard:'⌂ Dashboard',instructorhome:'⌂ Home',clienthome:'⌂ Home',clients:'◎ Clients',schedule:'□ Schedule',pos:'$ POS / Sales',memberships:'◇ Memberships',inventory:'▣ Inventory',expenses:'− Expenses',finance:'↗ Finance',team:'◌ Team',operations:'✦ Operations',settings:'⚙ Settings',payment:'$ Record Payment',frontdesk:'$ Front Desk',account:'⚙ Account',book:'□ Book a Class',mybookings:'✓ My Bookings',packages:'◇ Packages',clientaccount:'◎ My Account'};return pages.map(x=>`<button data-page="${x}" class="${page===x?'active':''}">${labels[x]}</button>`).join('')+(isOwner()?db.custom_sections.filter(x=>x.visible_owner!==false).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(x=>`<button data-custom="${x.id}" class="${page==='custom:'+x.id?'active':''}">${esc(x.icon||'•')} ${esc(x.name)}</button>`).join(''):'')}
+function activeAnnouncementBanners(){const target=isClient()?'Clients':(isInstructor()||isReceptionist())?'Instructors':'Everyone';return (db.announcements||[]).filter(a=>a.active!==false&&(isOwner()||a.audience==='Everyone'||a.audience===target)).map(a=>`<div class="notice card" style="margin-bottom:12px"><b>${esc(a.title)}</b><p>${esc(a.message)}</p></div>`).join('')}
+function layout(content,title,subtitle=''){const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';$("#app").innerHTML=`<div class="app"><aside class="sidebar"><div class="brand">CORE THEORY<small>${role} Portal</small></div><div class="nav">${nav()}</div><div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div><button class="btn logout" onclick="logout()">Log out</button></aside><main class="main"><div class="topbar"><div><h1>${title}</h1><p>${subtitle}</p><div class="sync-note">☁ Cloud connected</div></div><button class="btn" onclick="loadAll()">Refresh</button></div>${activeAnnouncementBanners()}${content}</main></div>`;document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{page='custom:'+b.dataset.custom;render()})}
+function render(){if(page.startsWith('custom:'))return customSectionPage(page.split(':')[1]);const f={dashboard,instructorhome,clienthome,clients,schedule,pos,memberships,inventory,expenses,finance,team,operations,settings,payment,frontdesk,account,book,mybookings,packages,clientaccount}[page];(f||schedule)()}
+
+const bookingCount=id=>db.bookings.filter(b=>String(b.class_id)===String(id)&&!['cancelled'].includes(b.status)).length;
+const activeBookings=id=>db.bookings.filter(b=>String(b.class_id)===String(id)&&b.status!=='cancelled');
+function dashboard(){const rev=db.sales.filter(s=>!s.voided_at).reduce((a,s)=>a+Number(s.total||0),0),exp=db.expenses.reduce((a,e)=>a+Number(e.amount||0),0);layout(`<div class="grid kpis"><div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div><div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div><div class="card kpi"><div class="label">Estimated profit</div><div class="value">${money(rev-exp)}</div></div><div class="card kpi"><div class="label">Clients</div><div class="value">${db.clients.length}</div></div></div><div class="spacer"></div><div class="card"><h3>Today's classes</h3>${db.classes.filter(c=>c.class_date===today()).map(classCard).join('')||'<div class="empty">No classes today.</div>'}</div>`,`Dashboard`,`Your studio at a glance`)}
+function clients(){layout(`<div class="card">${isOwner()?'<div class="toolbar"><button class="btn primary" onclick="clientModal()">+ Add client</button></div>':''}${db.clients.length?`<table><thead><tr><th>Client</th><th>Phone</th><th>Package</th><th>Sessions</th><th>Expiry</th>${isOwner()?'<th></th>':''}</tr></thead><tbody>${db.clients.map(c=>`<tr><td><b>${esc(c.name)}</b><div class="muted">${esc(c.email||'')}</div></td><td>${esc(c.phone||'')}</td><td>${esc(c.package||'—')}</td><td>${c.sessions??0}</td><td>${esc(c.expiry||'—')}</td>${isOwner()?`<td><button class="btn small" onclick="clientHistory('${c.id}')">History</button> <button class="btn small" onclick="clientModal('${c.id}')">Edit</button> <button class="btn small" onclick="sellMembership('${c.id}')">Add package</button> <button class="btn small danger" onclick="deleteClient('${c.id}')">Delete</button></td>`:''}</tr>`).join('')}</tbody></table>`:'<div class="empty">No clients yet.</div>'}</div>`,`Clients`,isOwner()?'Packages, attendance and payment history':'Client details and package balances')}
+function clientHistory(id){const c=db.clients.find(x=>String(x.id)===String(id)),bs=db.bookings.filter(b=>String(b.client_id)===String(id));modal(`${esc(c?.name||'Client')} history`,`<p><b>Package:</b> ${esc(c?.package||'—')} · <b>Sessions:</b> ${c?.sessions??0} · <b>Expiry:</b> ${esc(c?.expiry||'—')}</p><h3>Attendance / bookings</h3>${bs.map(b=>{const cl=db.classes.find(x=>String(x.id)===String(b.class_id));return `<div class="cart-row"><span>${esc(cl?.class_date||'')} · ${esc(cl?.class_type||'Class')}</span><span class="badge">${esc(b.status)}</span></div>`}).join('')||'<div class="empty">No booking history.</div>'}`)}
+
+function mondayOfWeek(offset=0){const d=new Date(),day=(d.getDay()+6)%7;d.setHours(12,0,0,0);d.setDate(d.getDate()-day+offset*7);return d}const dateISO=d=>d.toISOString().slice(0,10);function formatTime(t){const [h,m]=t.split(':').map(Number);return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`}
+function levelColor(level){return db.class_levels.find(x=>x.name===level)?.color||'#eee8df'}
+function schedule(){const mon=mondayOfWeek(scheduleWeekOffset),days=[];for(let i=0;i<6;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);days.push(d)}layout(`<div class="schedule-tabs"><button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';schedule()">PILATES</button><button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';schedule()">MEGACORE</button></div><div class="schedule-tools"><div class="toolbar">${isOwner()?'<button class="btn primary" onclick="classModal()">+ Add class</button>':''}<button class="btn" onclick="scheduleWeekOffset--;schedule()">← Previous</button><button class="btn" onclick="scheduleWeekOffset=0;schedule()">This week</button><button class="btn" onclick="scheduleWeekOffset++;schedule()">Next →</button></div></div>${scheduleTable(days,studioTab)}`,`Schedule`,`${studioTab} weekly timetable — same times stay on the same row`)}
+function scheduleTable(days,type){const dates=new Set(days.map(dateISO)),cs=db.classes.filter(c=>dates.has(c.class_date)&&(c.studio_type||'Pilates')===type),times=[...new Set(cs.map(c=>(c.class_time||'').slice(0,5)).filter(Boolean))].sort();if(!times.length)for(let h=7;h<=20;h++)times.push(String(h).padStart(2,'0')+':00');return `<div class="card schedule-wrap"><table class="weekly-schedule"><thead><tr><th class="time-col">Time</th>${days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'long'})}<small>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</small></th>`).join('')}</tr></thead><tbody>${times.map(t=>`<tr><th class="time-col">${formatTime(t)}</th>${days.map(d=>`<td class="schedule-cell">${cs.filter(c=>c.class_date===dateISO(d)&&(c.class_time||'').slice(0,5)===t).map(classCard).join('')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+function classCard(c){const n=bookingCount(c.id);return `<div class="class-card" style="--level:${levelColor(c.level)}" onclick="openClass('${c.id}')"><b>${esc(c.class_type||'Class')}</b><span>${esc(c.level||'Open Level')} · ${esc(c.instructor||'No instructor')}</span><small>${formatTime((c.class_time||'00:00').slice(0,5))} · ${n}/${c.capacity||0} booked</small></div>`}
+function openClass(id){const c=db.classes.find(x=>String(x.id)===String(id));if(!c)return;const bs=activeBookings(id);const rows=bs.map(b=>{const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id));const cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null;const clientName=cl?.name||roster?.client_name||'Client';return `<div class="booking-person"><span><b>${esc(clientName)}</b><small>${esc(b.status)} · ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}</small></span>${isStaff()?`<span>${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}<button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button></span>`:''}</div>`}).join('');modal(`${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,`<p><span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}</p><h3>Bookings ${bs.length}/${c.capacity||0}</h3>${rows||'<div class="empty">No bookings yet.</div>'}${isOwner()?`<button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button> <button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button>`:''}`)}
+function addBookingModal(classId){const booked=new Set(activeBookings(classId).map(b=>String(b.client_id)));modal('Add client to class',`<div class="form"><div class="full"><label>Client</label><select id="bkclient">${db.clients.filter(c=>!booked.has(String(c.id))).map(c=>`<option value="${c.id}">${esc(c.name)} · ${c.sessions??0} sessions</option>`).join('')}</select></div><div class="full"><button class="btn primary" onclick="staffBook('${classId}')">Add booking</button></div></div>`)}
+async function staffBook(classId){const clientId=$("#bkclient").value;if(!clientId)return;const {data,error}=await sb.rpc('staff_book_client',{p_class_id:String(classId),p_client_id:String(clientId)});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert(data?.payment_status==='pending'?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.'):(data?.status==='waitlist'?'Client added to waitlist.':'Client booked using their valid package.'));openClass(classId)}
+async function checkIn(bookingId){const b=db.bookings.find(x=>String(x.id)===String(bookingId));const pending=b?.payment_status==='pending';const {error}=await sb.rpc('check_in_booking',{p_booking_id:bookingId});if(error)return alert(error.message);await loadAll();alert(pending?'Attendance marked. Payment is still pending; the session will be deducted automatically after payment.':'Checked in. Session deducted.')}
+async function setBookingStatus(id,status){if(status!=='no_show')return;const {error}=await sb.rpc('mark_booking_no_show',{p_booking_id:id});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Marked as no-show.')}
+
+function classModal(){modal('Add class',classForm()+(!arguments.length?`<div class="spacer"></div><div class="card"><h3>Paste Classes</h3><p class="muted">Paste a weekly timetable. Use a heading like <b>Monday | Every week</b>, then one class per line: Time | Studio | Level | Class Name | Instructor | Capacity.</p><textarea id="classPaste" rows="12" placeholder="Monday | Every week\n8 AM | Pilates | Open Level | By the Book | Vanessa | 10\n9 AM | Pilates | Beginner | By the Book | Vanessa | 10\n10 AM | Pilates | Open Level | Cheeky Business | Lea | 10\n\nTuesday | Every week\n4 PM | Megacore | Intermediate | Dynamic | Vanessa | 10"></textarea><div class="toolbar" style="margin-top:10px"><button class="btn primary" onclick="pasteClasses()">Add pasted classes</button></div><small class="muted">Use full level names only: Beginner, Open Level, Intermediate, or Advanced. “Every week” creates 12 weeks by default.</small></div>`:''))}function classForm(c={}){return `<div class="form"><div><label>Date</label><input type="date" id="cldate" value="${c.class_date||today()}"></div><div><label>Time</label><input type="time" id="cltime" value="${(c.class_time||'').slice(0,5)}"></div><div><label>Studio</label><select id="clstudio"><option ${c.studio_type==='Pilates'?'selected':''}>Pilates</option><option ${c.studio_type==='Megacore'?'selected':''}>Megacore</option></select></div><div><label>Level</label><select id="cllevel">${db.class_levels.map(l=>`<option ${c.level===l.name?'selected':''}>${esc(l.name)}</option>`).join('')}</select></div><div><label>Class name</label><input id="cltype" value="${esc(c.class_type||'')}" placeholder="Rise & Shine"></div><div><label>Instructor</label><select id="clinstructor">${db.team.filter(t=>t.role==='Instructor'&&t.auth_user_id).map(t=>`<option value="${t.auth_user_id}" data-name="${esc(t.name)}" ${String(c.instructor_user_id||'')===String(t.auth_user_id)?'selected':''}>${esc(t.name)}</option>`).join('')}<option value="" ${!c.instructor_user_id?'selected':''}>Unassigned</option></select></div><div><label>Capacity</label><input type="number" id="clcap" value="${c.capacity||10}"></div>${!c.id?'<div><label>Repeat weekly</label><select id="clrepeat"><option value="1">No</option><option value="4">4 weeks</option><option value="8">8 weeks</option><option value="12">12 weeks</option></select></div>':''}<div class="full"><button class="btn primary" onclick="${c.id?`saveClass('${c.id}')`:'addClass()'}">Save</button>${c.id?` <button class="btn danger" onclick="deleteClass('${c.id}')">Delete</button>`:''}</div></div>`}
+
+function normalizePastedLevel(v){
+  const raw=String(v||'').trim(),k=raw.toLowerCase().replace(/[._-]/g,' ').replace(/\s+/g,' ');
+  const map={beginner:'Beginner','open level':'Open Level',intermediate:'Intermediate',advanced:'Advanced'};
+  const wanted=map[k]||raw;
+  return db.class_levels.find(x=>String(x.name).toLowerCase()===String(wanted).toLowerCase())?.name||wanted;
+}
+function parsePastedTime(v){
+  const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');
+  let m=x.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+  if(m){let h=+m[1],min=+(m[2]||0);if(h<1||h>12||min>59)return null;if(m[3]==='PM'&&h!==12)h+=12;if(m[3]==='AM'&&h===12)h=0;return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`}
+  m=x.match(/^(\d{1,2}):(\d{2})$/);if(m&&+m[1]<24&&+m[2]<60)return `${String(+m[1]).padStart(2,'0')}:${m[2]}`;
+  return null;
+}
+function nextWeekdayDate(dayName){
+  const names=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],target=names.findIndex(x=>x.toLowerCase()===String(dayName).toLowerCase());
+  if(target<0)return null;const d=new Date();d.setHours(12,0,0,0);let add=(target-d.getDay()+7)%7;if(add===0)add=7;d.setDate(d.getDate()+add);return d;
+}
+function findPastedInstructor(name){
+  const n=String(name||'').trim().toLowerCase();if(!n||n==='unassigned')return {name:'',id:null};
+  const matches=db.team.filter(t=>t.role==='Instructor'&&t.auth_user_id&&String(t.name||'').trim().toLowerCase()===n);
+  return matches.length===1?{name:matches[0].name,id:matches[0].auth_user_id}:null;
+}
+async function pasteClasses(){
+  const textValue=$('#classPaste')?.value||'';if(!textValue.trim())return alert('Paste your weekly classes first.');
+  const lines=textValue.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),dayRe=/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?:\s*\|\s*(Every week|One class only))?$/i;
+  let currentDay=null,repeat=12,parsed=[],errors=[];
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i],dm=line.match(dayRe);
+    if(dm){currentDay=dm[1];repeat=/one class only/i.test(dm[2]||'')?1:12;continue}
+    if(!currentDay){errors.push(`Line ${i+1}: add a day heading first, for example Monday | Every week.`);continue}
+    let parts=line.includes('|')?line.split('|').map(x=>x.trim()):[];
+    if(parts.length!==6){errors.push(`Line ${i+1}: expected Time | Studio | Level | Class Name | Instructor | Capacity.`);continue}
+    const [timeRaw,studioRaw,levelRaw,className,instructorRaw,capRaw]=parts,time=parsePastedTime(timeRaw),studio=/^mega\s*core$/i.test(studioRaw)?'Megacore':/^pilates$/i.test(studioRaw)?'Pilates':null,level=normalizePastedLevel(levelRaw),cap=Number(capRaw),inst=findPastedInstructor(instructorRaw);
+    if(!time)errors.push(`Line ${i+1}: invalid time “${timeRaw}”.`);
+    if(!studio)errors.push(`Line ${i+1}: studio must be Pilates or Megacore.`);
+    if(!db.class_levels.some(x=>String(x.name).toLowerCase()===String(level).toLowerCase()))errors.push(`Line ${i+1}: level “${levelRaw}” is not configured in Class Levels.`);
+    if(!className)errors.push(`Line ${i+1}: class name is missing.`);
+    if(!inst)errors.push(`Line ${i+1}: instructor “${instructorRaw}” was not found exactly once in Team.`);
+    if(!Number.isInteger(cap)||cap<1)errors.push(`Line ${i+1}: capacity must be a whole number greater than 0.`);
+    if(time&&studio&&className&&inst&&Number.isInteger(cap)&&cap>0&&db.class_levels.some(x=>String(x.name).toLowerCase()===String(level).toLowerCase()))parsed.push({day:currentDay,repeat,time,studio,level,className,instructor:inst.name,instructor_user_id:inst.id,capacity:cap});
+  }
+  if(errors.length)return alert('Nothing was added. Fix these lines first:\n\n'+errors.join('\n'));
+  if(!parsed.length)return alert('No classes found.');
+  const rows=[];
+  for(const c of parsed){const base=nextWeekdayDate(c.day),group=c.repeat>1?crypto.randomUUID():null;for(let w=0;w<c.repeat;w++){const d=new Date(base);d.setDate(base.getDate()+7*w);rows.push({class_date:dateISO(d),class_time:c.time,class_type:c.className,instructor:c.instructor,instructor_user_id:c.instructor_user_id,capacity:c.capacity,studio_type:c.studio,level:c.level,recurring_group:group})}}
+  const btn=document.querySelector('#modal .card .btn.primary');if(btn){btn.disabled=true;btn.textContent='Adding…'}
+  const {error}=await sb.from('classes').insert(rows);if(error){if(btn){btn.disabled=false;btn.textContent='Add pasted classes'}return alert(error.message)}
+  $('#modal')?.remove();await loadAll();alert(`${rows.length} class${rows.length===1?'':'es'} added successfully.`);
+}
+
+async function addClass(){const repeats=+$("#clrepeat").value,base=new Date($("#cldate").value+'T12:00:00'),group=crypto.randomUUID(),rows=[];for(let i=0;i<repeats;i++){const d=new Date(base);d.setDate(base.getDate()+7*i);rows.push({class_date:dateISO(d),class_time:$("#cltime").value,class_type:$("#cltype").value,instructor:$("#clinstructor").selectedOptions[0]?.dataset.name||'',instructor_user_id:$("#clinstructor").value||null,capacity:+$("#clcap").value,studio_type:$("#clstudio").value,level:$("#cllevel").value,recurring_group:repeats>1?group:null})}const {error}=await sb.from('classes').insert(rows);if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+function editClassModal(id){const c=db.classes.find(x=>String(x.id)===String(id));modal('Edit class',classForm(c))}async function saveClass(id){const {error}=await sb.from('classes').update({class_date:$("#cldate").value,class_time:$("#cltime").value,class_type:$("#cltype").value,instructor:$("#clinstructor").selectedOptions[0]?.dataset.name||'',instructor_user_id:$("#clinstructor").value||null,capacity:+$("#clcap").value,studio_type:$("#clstudio").value,level:$("#cllevel").value}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll()}async function deleteClass(id){if(!confirm('Cancel this class? Existing bookings will be cancelled without session deductions.'))return;const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(id)});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Class cancelled safely.')}
+
+function book(){const days=[];for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(d)}const cs=db.classes.filter(c=>days.map(dateISO).includes(c.class_date)&&!c.cancelled);layout(`<div class="schedule-tabs"><button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button><button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button></div><div class="client-class-grid">${cs.filter(c=>(c.studio_type||'Pilates')===studioTab).sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time)).map(c=>{const n=bookingCount(c.id),full=n>=Number(c.capacity||0);return `<div class="card client-class"><div class="date">${new Date(c.class_date+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div><h3>${esc(c.class_type)}</h3><span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span><p>${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'')}</p><p class="muted">${Math.max(0,Number(c.capacity||0)-n)} spots remaining</p><button class="btn primary" ${full?'disabled':''} onclick="clientBook('${c.id}')">${full?'Full':'Book'}</button></div>`}).join('')||'<div class="empty">No upcoming classes.</div>'}</div>`,`Book a Class`,`Choose Pilates or Megacore and reserve your spot`)}
+
+function frontdesk(){
+  if(!isInstructor()||!db.frontDeskDuty)return account();
+  const rows=(db.frontDeskToday||[]);
+  const byClass={};
+  rows.forEach(r=>{const k=r.class_id; if(!byClass[k])byClass[k]={name:r.class_name,time:r.class_time,instructor:r.instructor_name,rows:[]};byClass[k].rows.push(r)});
+  const html=Object.values(byClass).map(g=>`<div class="card"><h3>${esc(g.name)} · ${g.time?formatTime(String(g.time).slice(0,5)):''}</h3><p class="muted">${esc(g.instructor||'')}</p>${g.rows.map(r=>`<div class="booking-person"><span><b>${esc(r.client_name)}</b><small>${esc(r.booking_status)} · ${r.payment_status==='pending'?'<b>Payment Pending</b>':'Paid'}${r.membership_name?' · '+esc(r.membership_name):''}${r.coupon_code?` · Coupon ${esc(r.coupon_code)} (${r.discount_percent||0}% off)`:''}</small></span><span>${r.payment_status==='pending'&&r.package_order_id?`<button class="btn small primary" onclick="frontDeskPayment('${r.package_order_id}')">Collect payment</button>`:''}</span></div>`).join('')}</div>`).join('');
+  layout(`<div class="notice card"><b>Front Desk Duty is active for today.</b><p>You can collect payments for any client in today's classes. Finance totals, expenses, payroll and the full Clients list remain private.</p></div>${html||'<div class="card empty">No bookings today.</div>'}`,'Front Desk',"Today's studio billing");
+}
+function frontDeskPayment(orderId){
+  const r=(db.frontDeskToday||[]).find(x=>String(x.package_order_id)===String(orderId));
+  const opts=(db.frontDeskMemberships||[]).map(m=>`<option value="${m.id}" ${String(m.id)===String(r?.membership_id)?'selected':''}>${esc(m.name)} — ${money(m.price)}</option>`).join('');
+  modal('Collect payment',`<p><b>${esc(r?.client_name||'Client')}</b></p><label>Package / session</label><select id="fdMembership">${opts}</select><button class="btn" onclick="changeFrontDeskPackage('${orderId}')">Change pending package</button><label>Payment method</label><select id="fdMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select><div class="toolbar"><button class="btn primary" id="fdPayBtn" onclick="settleFrontDeskOrder('${orderId}')">Confirm payment</button><button class="btn danger" onclick="cancelFrontDeskOrder('${orderId}')">Cancel pending order</button></div><p class="muted">If attendance was already marked, the session will be deducted automatically after payment.</p>`);
+}
+async function changeFrontDeskPackage(orderId){const id=$("#fdMembership")?.value;if(!id)return;const {error}=await sb.rpc('change_pending_package_order',{p_order_id:orderId,p_membership_id:id});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Pending package changed. No payment was recorded.')}
+async function settleFrontDeskOrder(orderId){const btn=$("#fdPayBtn");if(btn){btn.disabled=true;btn.textContent='Processing…'}const method=$("#fdMethod")?.value||'Cash';const {error}=await sb.rpc('settle_package_order',{p_order_id:orderId,p_payment_method:method});if(error){if(btn){btn.disabled=false;btn.textContent='Confirm payment'}return alert(error.message)}$("#modal")?.remove();await loadAll();alert('Payment recorded and package activated.')}
+async function cancelFrontDeskOrder(orderId){if(!confirm('Cancel this pending package order?'))return;const {error}=await sb.rpc('cancel_package_order',{p_order_id:orderId});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();}
+
+
+function instructorhome(){const mine=[...db.classes].filter(c=>String(c.instructor_user_id||'')===String(session.user.id)&&!c.cancelled),now=new Date(),todayClasses=mine.filter(c=>c.class_date===today()).sort((a,b)=>String(a.class_time).localeCompare(String(b.class_time))),upcoming=mine.filter(c=>new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)>=now).sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time)),pastCount=mine.filter(c=>new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<now).length,next=upcoming[0];layout(`<div class="grid three"><div class="card kpi"><div class="label">Classes today</div><div class="value">${todayClasses.length}</div></div><div class="card kpi"><div class="label">Classes taught</div><div class="value">${pastCount}</div></div><div class="card kpi"><div class="label">Front Desk</div><div class="value" style="font-size:22px">${db.frontDeskDuty?'Active':'Off'}</div></div></div><div class="spacer"></div><div class="card"><h3>Next class</h3>${next?`<div class="booking-person"><span><b>${esc(next.class_type||'Class')}</b><small>${esc(next.class_date)} · ${formatTime((next.class_time||'00:00').slice(0,5))} · ${esc(next.level||'Open Level')}</small></span><button class="btn primary" onclick="page='schedule';render()">Open schedule</button></div>`:'<div class="empty">No upcoming classes.</div>'}</div><div class="spacer"></div><div class="card"><h3>Today</h3>${todayClasses.map(classCard).join('')||'<div class="empty">No classes today.</div>'}</div>`,`Home`,`Your teaching day at a glance`)}
+
+function packageWarning(c){if(!c)return '';const td=new Date(today()+'T12:00:00'),ex=c.expiry?new Date(c.expiry+'T12:00:00'):null;if(Number(c.sessions)===0)return 'No sessions remaining';if(Number(c.sessions)===1)return '1 session left';if(ex){const d=Math.ceil((ex-td)/86400000);if(d<0)return 'Package expired';if(d<=3)return `Expires in ${d} day${d===1?'':'s'}`}return ''}
+function clienthome(){const c=myClient(),mine=db.bookings.filter(b=>String(b.client_id)===String(c?.id)&&!['cancelled','no_show'].includes(b.status)),upcoming=mine.map(b=>({b,cl:db.classes.find(x=>String(x.id)===String(b.class_id))})).filter(x=>x.cl&&!x.cl.cancelled&&new Date(`${x.cl.class_date}T${String(x.cl.class_time||'00:00').slice(0,8)}`)>=new Date()).sort((a,b)=>(a.cl.class_date+a.cl.class_time).localeCompare(b.cl.class_date+b.cl.class_time)),next=upcoming[0],pending=db.package_orders.find(o=>String(o.client_id)===String(c?.id)&&o.status==='pending'),warn=packageWarning(c),history=(db.client_payments||[]).slice(0,5);layout(`<div class="grid three"><div class="card kpi"><div class="label">Package</div><div class="value" style="font-size:22px">${esc(c?.package||'None')}</div></div><div class="card kpi"><div class="label">Sessions left</div><div class="value">${c?.sessions??0}</div></div><div class="card kpi"><div class="label">Expiry</div><div class="value" style="font-size:22px">${esc(c?.expiry||'—')}</div></div></div>${warn?`<div class="warning" style="margin-top:12px">${esc(warn)}</div>`:''}${pending?`<div class="notice card" style="margin-top:12px"><b>Payment pending</b><p>Your selected package is waiting for payment at Core Theory.</p></div>`:''}<div class="spacer"></div><div class="card"><h3>Next class</h3>${next?`<div class="booking-person"><span><b>${esc(next.cl.class_type||'Class')}</b><small>${esc(next.cl.class_date)} · ${formatTime((next.cl.class_time||'00:00').slice(0,5))} · ${esc(next.cl.studio_type||'Pilates')}</small></span><button class="btn" onclick="page='mybookings';render()">My bookings</button></div>`:'<div class="empty">No upcoming booking.</div>'}<button class="btn primary" onclick="page='book';render()">Book a Class</button></div><div class="spacer"></div><div class="card"><h3>Recent payments</h3>${history.map(p=>`<div class="cart-row"><span><b>${esc(p.description||'Payment')}</b><small>${new Date(p.created_at).toLocaleDateString()} · ${esc(p.payment_method||'')}${p.coupon_code?` · Coupon ${esc(p.coupon_code)} (${p.discount_percent||0}% off)`:''}</small></span><b>${money(p.total)}</b></div>`).join('')||'<div class="empty">No payment history yet.</div>'}</div>`,`Home`,`Your Core Theory account`)}
+
+function myClient(){return db.clients[0]}
+function packageEligible(m,cl){const scope=m.studio_scope||'Both',type=cl.studio_type||'Pilates';return scope==='Both'||scope===type}
+function clientBook(classId){const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');const eligible=sortedMemberships(db.memberships.filter(m=>packageEligible(m,cl))),rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===(cl.studio_type||'Pilates'))),currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===(cl.studio_type||'Pilates'));modal('Choose package',`<p><b>${esc(cl.class_type)}</b> · ${esc(cl.studio_type||'Pilates')} · ${esc(cl.class_date)}</p><label>How would you like to book?</label><select id="bookPackage">${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} — FREE</option>`).join('')}${currentOk?`<option value="current">Use my current package (${c.sessions===999?'Unlimited':c.sessions+' sessions left'})</option>`:''}${eligible.map(m=>`<option value="buy:${m.id}">Buy ${esc(m.name)} — ${money(m.price)} · Pay at Front Desk</option>`).join('')}</select><label>Coupon code <span class="muted">(optional, when buying a package)</span></label><input id="bookCoupon" placeholder="Enter coupon code"><p class="muted">Active coupon codes are applied before payment. Free rewards do not require payment.</p><button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)}
+async function confirmClientBooking(classId){const choice=$("#bookPackage")?.value;if(!choice)return alert('Please choose an option.');let membershipId=null,rewardId=null;if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];const coupon=membershipId?($("#bookCoupon")?.value||'').trim():null,btn=document.querySelector('#modal .btn.primary');if(btn){btn.disabled=true;btn.textContent='Booking…'}const {data,error}=await sb.rpc('book_class_v3',{p_class_id:String(classId),p_membership_id:membershipId,p_coupon_code:coupon||null,p_reward_id:rewardId});if(error){if(btn){btn.disabled=false;btn.textContent='Confirm booking'}return alert(error.message)}$("#modal")?.remove();await loadAll();const status=data?.status||'booked',pay=data?.payment_status||'paid';alert(status==='waitlist'?(pay==='pending'?'Added to waitlist. Package payment is pending at the front desk.':'Added to waitlist.'):(rewardId?'Booked with your free reward!':pay==='pending'?'Booked! Your package payment is due at the front desk.':'Booked!'))}
+function mybookings(){const c=myClient(),bs=db.bookings.filter(b=>String(b.client_id)===String(c?.id)&&b.status!=='cancelled');layout(`<div class="card">${bs.map(b=>{const cl=db.classes.find(x=>String(x.id)===String(b.class_id));return `<div class="booking-person"><span><b>${esc(cl?.class_type||'Class')}</b><small>${esc(cl?.class_date||'')} · ${cl?.class_time?formatTime(cl.class_time.slice(0,5)):''} · ${esc(b.status)}</small></span>${b.status==='booked'?`<button class="btn small danger" onclick="cancelMyBooking('${b.id}')">Cancel</button>`:''}</div>`}).join('')||'<div class="empty">No upcoming bookings.</div>'}</div>`,`My Bookings`,`Your reservations and attendance`)}async function cancelMyBooking(id){if(!confirm('Cancel this booking?'))return;const {error}=await sb.rpc('cancel_booking_safely',{p_booking_id:id});if(error)return alert(error.message);await loadAll();alert('Booking cancelled.')}
+function packages(){const c=myClient();layout(`<div class="grid three">${sortedMemberships().map(m=>`<div class="card"><h3>${esc(m.name)}</h3><div class="package-price">${money(m.price)}</div><p>${m.is_private?'Private Session':(m.sessions===999?'Unlimited':m.sessions+' sessions')} · ${m.validity_days} days</p><button class="btn primary" onclick="packageRequestModal('${m.id}')">Choose package</button></div>`).join('')}</div><div class="card notice"><b>Pay at Core Theory</b><p>Choose a package and optionally enter an active coupon code. Your request stays Payment Pending until payment is collected.</p></div>`,`Packages`,`Current package: ${esc(c?.package||'None')} · ${c?.sessions??0} sessions remaining`)}
+function packageRequestModal(id){const m=db.memberships.find(x=>String(x.id)===String(id));if(!m)return;modal('Request package',`<p><b>${esc(m.name)}</b> · ${money(m.price)}</p><label>Coupon code <span class="muted">(optional)</span></label><input id="requestCoupon" placeholder="Enter coupon code"><button class="btn primary full" onclick="requestPackage('${m.id}')">Request package</button>`)}
+async function requestPackage(id){const code=($("#requestCoupon")?.value||'').trim();const {data,error}=await sb.rpc('request_package_order_v2',{p_membership_id:String(id),p_coupon_code:code||null});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert(data?.discount_percent?`Package request sent. Coupon applied: ${data.discount_percent}% off. Payment is pending.`:'Package request sent to Core Theory. Payment is pending.')}
+function clientaccount(){const c=myClient();layout(`<div class="card compact-card"><h3>${esc(c?.name||profile?.full_name||'Client')}</h3><p>${esc(session.user.email)}</p><p><b>Package:</b> ${esc(c?.package||'None')}</p><p><b>Sessions:</b> ${c?.sessions??0}</p><p><b>Expiry:</b> ${esc(c?.expiry||'—')}</p><button class="btn" onclick="setPasswordScreen()">Change password</button> <button class="btn danger" onclick="logout()">Log out</button></div>`,`My Account`,`Core Theory client portal`)}
+
+function payment(){layout(`<div class="card compact-card"><h3>Record client payment</h3><div class="form"><div class="full"><label>Client</label><select id="rpclient">${db.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div><label>Amount</label><input id="rpamount" type="number" step=".01"></div><div><label>Method</label><select id="rppay"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select></div><div class="full"><label>Note</label><input id="rpnote" placeholder="Package / private / other"></div><div class="full"><button class="btn primary" onclick="recordPayment()">Record payment</button></div></div></div>`,`Record Payment`,`Payments are stamped with your account and time`)}async function recordPayment(){const {error}=await sb.from('sales').insert({client_id:$("#rpclient").value,total:+$("#rpamount").value,payment_method:$("#rppay").value,items:[{name:$("#rpnote").value||'Payment'}],created_by:session.user.id});if(error)return alert(error.message);await loadAll();alert('Payment recorded.')}
+function expenses(){layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="expenseModal()">+ Add expense</button></div>${db.expenses.length?`<table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${db.expenses.map(e=>`<tr><td>${esc(e.expense_date)}</td><td>${esc(e.category)}</td><td>${esc(e.description||'')}</td><td>${money(e.amount)}</td><td><button class="btn small" onclick="expenseModal('${e.id}')">Edit</button> <button class="btn small danger" onclick="removeItem('expenses','${e.id}')">Delete</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">No expenses.</div>'}</div>`,`Expenses`,`Studio costs and audit trail`)}
+function expenseModal(id=''){const e=id?db.expenses.find(x=>String(x.id)===String(id)):null;modal(e?'Edit expense':'Add expense',`<div class="form"><div><label>Date</label><input type="date" id="edate" value="${e?.expense_date||today()}"></div><div><label>Category</label><select id="ecat">${['Electricity','Rent','Water','Internet','Cleaning','Payroll','Inventory','Marketing','Maintenance','Other'].map(x=>`<option ${x===e?.category?'selected':''}>${x}</option>`).join('')}</select></div><div class="full"><label>Description</label><input id="edesc" value="${esc(e?.description||'')}"></div><div><label>Amount</label><input type="number" step=".01" id="eamount" value="${e?.amount??''}"></div><div><label>Payment</label><select id="epay">${['Cash','Card','Whish','Transfer'].map(x=>`<option ${x===e?.payment_method?'selected':''}>${x}</option>`).join('')}</select></div><div class="full"><button class="btn primary" onclick="${e?`saveExpense('${e.id}')`:'addExpense()'}">${e?'Save changes':'Save expense'}</button></div></div>`)}
+async function addExpense(){const payload={expense_date:$("#edate").value,category:$("#ecat").value,description:$("#edesc").value,amount:+$("#eamount").value,payment_method:$("#epay").value,created_by:session.user.id};const {error}=await sb.from('expenses').insert(payload);if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveExpense(id){const payload={expense_date:$("#edate").value,category:$("#ecat").value,description:$("#edesc").value,amount:+$("#eamount").value,payment_method:$("#epay").value};const {error}=await sb.from('expenses').update(payload).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Expense updated.')}
+
+function memberships(){const ms=sortedMemberships();layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="membershipModal()">+ Add membership</button></div>${ms.length?ms.map((m,i)=>`<div class="cart-row"><span><b>${esc(m.name)}</b>${m.is_private?' <span class="badge">Private Session</span>':''}<small>${m.is_private?'Private Session':(m.sessions===999?'Unlimited':m.sessions+' sessions')} · ${m.validity_days} days · ${esc(m.studio_scope||'Both')}</small></span><span class="row"><b>${money(m.price)}</b><button class="btn small" ${i===0?'disabled':''} onclick="moveMembership('${m.id}',-1)">↑</button><button class="btn small" ${i===ms.length-1?'disabled':''} onclick="moveMembership('${m.id}',1)">↓</button><button class="btn small" onclick="editMembership('${m.id}')">Edit</button><button class="btn small danger" onclick="removeItem('memberships','${m.id}')">Delete</button></span></div>`).join(''):'<div class="empty">No memberships yet.</div>'}</div>`,`Memberships`,`Use ↑ and ↓ to choose the order shown here and in POS / Sales`)}
+function membershipModal(m=null){const editing=!!m;modal(editing?'Edit membership':'Add membership',`<div class="form"><div><label>Name</label><input id="mname" value="${esc(m?.name||'')}"></div><div><label>Sessions</label><input type="number" id="msessions" value="${m?.sessions??''}" ${m?.is_private?'disabled':''}></div><div><label>Price</label><input type="number" step=".01" id="mprice" value="${m?.price??''}"></div><div><label>Validity days</label><input type="number" id="mdays" value="${m?.validity_days??30}"></div><div class="full"><label>Valid for</label><select id="mscope"><option ${(!m||m.studio_scope==='Both'||!m.studio_scope)?'selected':''}>Both</option><option ${m?.studio_scope==='Pilates'?'selected':''}>Pilates</option><option ${m?.studio_scope==='Megacore'?'selected':''}>Megacore</option></select></div><div class="full"><label><input type="checkbox" id="mprivate" ${m?.is_private?'checked':''} onchange="togglePrivateMembership()"> Private session</label><small class="muted">Private Session memberships are always 1 session.</small></div><div class="full"><button class="btn primary" onclick="saveMembership('${m?.id||''}')">${editing?'Save changes':'Save membership'}</button></div></div>`)}
+function togglePrivateMembership(){const on=$("#mprivate")?.checked,s=$("#msessions");if(!s)return;if(on){s.value=1;s.disabled=true}else{s.disabled=false}}
+function editMembership(id){const m=db.memberships.find(x=>String(x.id)===String(id));if(m)membershipModal(m)}
+async function saveMembership(id=''){const isPrivate=$("#mprivate")?.checked===true,payload={name:$("#mname").value.trim(),sessions:isPrivate?1:+$("#msessions").value,price:+$("#mprice").value,validity_days:+$("#mdays").value,studio_scope:$("#mscope").value,is_private:isPrivate};if(!payload.name)return alert('Enter a membership name.');if(!id){payload.sort_order=(sortedMemberships().at(-1)?.sort_order||0)+10}const q=id?sb.from('memberships').update(payload).eq('id',id):sb.from('memberships').insert(payload);const {error}=await q;if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function moveMembership(id,direction){const ms=sortedMemberships(),i=ms.findIndex(m=>String(m.id)===String(id)),j=i+direction;if(i<0||j<0||j>=ms.length)return;const a=ms[i],b=ms[j],ao=Number(a.sort_order||i*10),bo=Number(b.sort_order||j*10);const {error:e1}=await sb.from('memberships').update({sort_order:bo}).eq('id',a.id);if(e1)return alert(e1.message);const {error:e2}=await sb.from('memberships').update({sort_order:ao}).eq('id',b.id);if(e2)return alert(e2.message);await loadAll();page='memberships';memberships()}
+
+
+function saleClientSearchHtml(){return `<label>Client</label><div><input id="saleClientSearch" autocomplete="off" placeholder="Type a client name…" value="${esc(selectedSaleClient?.name||'')}" oninput="selectedSaleClient=null;searchSaleClients(this.value)"><div id="saleClientResults"></div></div><div class="muted" id="saleClientChosen">${selectedSaleClient?`Selected: ${esc(selectedSaleClient.name)}`:'Leave blank for a retail walk-in. A client is required when selling a package.'}</div>`}
+async function searchSaleClients(q){const box=$("#saleClientResults");if(!box)return;const term=String(q||'').trim();if(term.length<2){box.innerHTML='';return}let rows=[];if(isOwner()){rows=db.clients.filter(c=>String(c.name||'').toLowerCase().includes(term.toLowerCase())).slice(0,8).map(c=>({id:String(c.id),name:c.name}))}else if(isFrontDeskStaff()&&db.frontDeskDuty){const {data,error}=await sb.rpc('front_desk_client_search',{p_query:term});if(error){box.innerHTML=`<div class="warning">${esc(error.message)}</div>`;return}rows=data||[]}box.innerHTML=rows.length?rows.map(c=>`<button type="button" class="btn small full" style="text-align:left;margin-top:6px" onclick="chooseSaleClient('${c.id}',decodeURIComponent('${encodeURIComponent(c.name||'')}'))">${esc(c.name)}</button>`).join(''):'<div class="muted" style="padding:8px 0">No matching client.</div>'}
+function chooseSaleClient(id,name){selectedSaleClient={id:String(id),name:String(name)};const input=$("#saleClientSearch");if(input)input.value=selectedSaleClient.name;const box=$("#saleClientResults");if(box)box.innerHTML='';const chosen=$("#saleClientChosen");if(chosen)chosen.innerHTML=`Selected: <b>${esc(selectedSaleClient.name)}</b>`}
+
+function pos(){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const memberships=isOwner()?db.memberships:(db.frontDeskMemberships||[]);
+  const packageItems=memberships.filter(x=>(x.studio_scope||'Both')===posPackageTab);
+  const subtotal=cart.reduce((a,x)=>a+Number(x.price||0),0);
+  const discount=Number(posPromo?.discount||0);
+  const total=Math.max(0,subtotal-discount);
+
+  layout(`<div class="pos">
+    <div class="card">
+      <h3>Packages</h3>
+      <div class="schedule-tabs" style="margin-bottom:14px">
+        <button class="tab ${posPackageTab==='Pilates'?'active':''}" onclick="posPackageTab='Pilates';pos()">PILATES</button>
+        <button class="tab ${posPackageTab==='Megacore'?'active':''}" onclick="posPackageTab='Megacore';pos()">MEGACORE</button>
+        <button class="tab ${posPackageTab==='Both'?'active':''}" onclick="posPackageTab='Both';pos()">MIX</button>
+      </div>
+      <div class="product-grid">
+        ${packageItems.map(x=>`<div class="product" onclick="addCart('membership','${x.id}')">
+          <b>${esc(x.name)}</b>
+          <small>${x.is_private?'Private Session':(x.sessions===999?'Unlimited':x.sessions+' sessions')}</small>
+          <div>${money(x.price)}</div>
+        </div>`).join('')||`<div class="empty">No ${esc(posPackageTab==='Both'?'Mix':posPackageTab)} memberships yet.</div>`}
+      </div>
+
+      <div class="spacer"></div>
+      <h3>Retail Products</h3>
+      <div class="product-grid">
+        ${products.map(x=>`<div class="product" onclick="addCart('product','${x.id}')">
+          <b>${esc(x.name)}</b><small>${x.stock??0} in stock</small><div>${money(x.price)}</div>
+        </div>`).join('')||'<div class="empty">No retail products yet.</div>'}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Current sale</h3>
+
+      ${cart.map((x,i)=>`<div class="cart-row">
+        <span>${esc(x.name)}</span>
+        <span>${money(x.price)} <button class="btn small" onclick="removeCartItem(${i})">×</button></span>
+      </div>`).join('')||'<div class="empty">Add an item.</div>'}
+
+      ${saleClientSearchHtml()}
+
+      <label>Payment</label>
+      <select id="payment">
+        <option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option>
+      </select>
+
+      <div class="pos-promo-box">
+        <label>Promo code</label>
+        <div class="pos-promo-row">
+          <input id="posPromoCode" placeholder="Enter promo code" value="${esc(posPromo?.code||'')}" oninput="this.value=this.value.toUpperCase()">
+          ${posPromo
+            ? `<button class="btn" type="button" onclick="removePosPromo()">Remove</button>`
+            : `<button class="btn" type="button" onclick="applyPosPromo()">Apply</button>`}
+        </div>
+        ${posPromo
+          ? `<div class="promo-success">✓ ${esc(posPromo.code)} applied · You save ${money(posPromo.discount)}</div>`
+          : `<div class="muted">Promo codes apply to package purchases. Select the client and package first.</div>`}
+      </div>
+
+      ${posPromo?`
+        <div class="pos-total-lines">
+          <div><span>Subtotal</span><b>${money(subtotal)}</b></div>
+          <div class="promo-discount"><span>Promo · ${esc(posPromo.code)}</span><b>−${money(discount)}</b></div>
+        </div>`:''}
+
+      <div class="pos-grand-total">
+        <span>Total</span>
+        <h2>${money(total)}</h2>
+      </div>
+
+      <button class="btn primary full" onclick="checkout()">Complete sale</button>
+    </div>
+  </div>`,`POS / Sales`,isOwner()?'Packages are grouped by Pilates, Megacore and Mix':'Front Desk Duty — packages grouped by studio type');
+}
+
+function removeCartItem(i){
+  cart.splice(i,1);
+  posPromo=null;
+  pos();
+}
+
+function addCart(kind,id){
+  const src=kind==='product'?(isOwner()?db.products:(db.frontDeskProducts||[])):(isOwner()?db.memberships:(db.frontDeskMemberships||[]));
+  const x=src.find(a=>String(a.id)===String(id));
+  if(!x)return alert('Item not found. Refresh and try again.');
+  cart.push({...x,kind});
+  posPromo=null;
+  pos();
+}
+
+async function applyPosPromo(){
+  const code=($("#posPromoCode")?.value||'').trim().toUpperCase();
+  if(!code)return alert('Enter a promo code first.');
+  if(!selectedSaleClient?.id)return alert('Select the client before applying a promo code.');
+
+  const packages=cart.filter(x=>x.kind==='membership');
+  if(!packages.length)return alert('Add a package before applying a promo code.');
+  if(packages.length>1)return alert('A promo code can be applied to one package at a time. Complete this package sale first, then start the next one.');
+
+  const btn=document.querySelector('.pos-promo-row .btn');
+  if(btn){btn.disabled=true;btn.textContent='Checking…'}
+
+  const {data,error}=await sb.rpc('preview_pos_promo',{
+    p_client_id:String(selectedSaleClient.id),
+    p_membership_id:String(packages[0].id),
+    p_coupon_code:code
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Apply'}
+    return alert(error.message);
+  }
+
+  posPromo={
+    code:data?.code||code,
+    discount:Number(data?.discount||0),
+    final_amount:Number(data?.final_amount||packages[0].price||0),
+    promo_id:data?.promo_id||null
+  };
+  pos();
+}
+
+function removePosPromo(){
+  posPromo=null;
+  pos();
+}
+
+async function checkout(){
+  if(!cart.length)return;
+
+  const cid=selectedSaleClient?.id||null;
+  const method=$("#payment").value;
+
+  if(cart.some(x=>x.kind==='membership')&&!cid)
+    return alert('Search and select a client before selling a package.');
+
+  if(posPromo){
+    const packages=cart.filter(x=>x.kind==='membership');
+    if(packages.length!==1)
+      return alert('A promo code can be applied to one package at a time.');
+
+    const btn=document.querySelector('.pos .btn.primary.full');
+    if(btn){btn.disabled=true;btn.textContent='Processing…'}
+
+    const items=cart.map(x=>({
+      id:String(x.id),
+      name:x.name,
+      price:Number(x.price||0),
+      kind:x.kind
+    }));
+
+    const {error}=await sb.rpc('complete_pos_sale_with_promo',{
+      p_client_id:String(cid),
+      p_payment_method:method,
+      p_items:items,
+      p_coupon_code:String(posPromo.code)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Complete sale'}
+      return alert(error.message);
+    }
+
+    cart=[];
+    selectedSaleClient=null;
+    posPromo=null;
+    await loadAll();
+    alert('Sale recorded with promo code.');
+    return;
+  }
+
+  const btn=document.querySelector('.pos .btn.primary.full');
+  if(btn){btn.disabled=true;btn.textContent='Processing…'}
+
+  const items=cart.map(x=>({
+    id:String(x.id),
+    name:x.name,
+    price:Number(x.price||0),
+    kind:x.kind
+  }));
+
+  const {error}=await sb.rpc('complete_pos_sale',{
+    p_client_id:cid,
+    p_payment_method:method,
+    p_items:items
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Complete sale'}
+    return alert(error.message);
+  }
+
+  cart=[];
+  selectedSaleClient=null;
+  posPromo=null;
+  await loadAll();
+  alert('Sale recorded.');
+}
+
+async function applyMembership(cid,m){const d=new Date();d.setDate(d.getDate()+Number(m.validity_days));return sb.from('clients').update({package:m.name,sessions:m.sessions,expiry:dateISO(d)}).eq('id',cid)}function sellMembership(cid){modal('Add package',`<select id="smid">${db.memberships.map(m=>`<option value="${m.id}">${esc(m.name)} — ${money(m.price)}</option>`).join('')}</select><button class="btn primary full" onclick="confirmMembership('${cid}')">Apply package</button>`)}async function confirmMembership(cid){const m=db.memberships.find(x=>String(x.id)===$("#smid").value);if(!m)return;const {error}=await sb.rpc('owner_apply_membership',{p_client_id:String(cid),p_membership_id:String(m.id)});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Package applied.')}
+function inventory(){layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="productModal()">+ Add product</button></div><table><thead><tr><th>Product</th><th>Cost</th><th>Sell</th><th>Stock</th><th>Low stock</th><th></th></tr></thead><tbody>${db.products.map(p=>`<tr><td><b>${esc(p.name)}</b><div class="muted">${esc(p.category||'')}</div></td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${p.stock}</td><td>${p.minimum_stock??0}</td><td><button class="btn small" onclick="editProduct('${p.id}')">Edit</button> <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button></td></tr>`).join('')}</tbody></table></div>`,`Inventory`,`Retail stock — edit products, cost, price and quantities`)}
+function productModal(p=null){const editing=!!p;modal(editing?'Edit product':'Add product',`<div class="form"><div><label>Name</label><input id="pname" value="${esc(p?.name||'')}"></div><div><label>Category</label><input id="pcat" value="${esc(p?.category||'Retail')}"></div><div><label>Cost</label><input id="pcost" type="number" step=".01" value="${p?.cost??''}"></div><div><label>Sell</label><input id="pprice" type="number" step=".01" value="${p?.price??''}"></div><div><label>Stock</label><input id="pstock" type="number" value="${p?.stock??0}"></div><div><label>Low stock</label><input id="pmin" type="number" value="${p?.minimum_stock??5}"></div><div class="full"><button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">${editing?'Save changes':'Save product'}</button></div></div>`)}
+function editProduct(id){const p=db.products.find(x=>String(x.id)===String(id));if(p)productModal(p)}
+async function addProduct(){const payload={name:$("#pname").value.trim(),category:$("#pcat").value.trim(),cost:+$("#pcost").value,price:+$("#pprice").value,stock:+$("#pstock").value,minimum_stock:+$("#pmin").value};if(!payload.name)return alert('Enter a product name.');const {error}=await sb.from('products').insert(payload);if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveProduct(id){const payload={name:$("#pname").value.trim(),category:$("#pcat").value.trim(),cost:+$("#pcost").value,price:+$("#pprice").value,stock:+$("#pstock").value,minimum_stock:+$("#pmin").value};if(!payload.name)return alert('Enter a product name.');const {error}=await sb.from('products').update(payload).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Product updated.')}
+
+function saleWhat(s){if(s.description)return s.description;const items=Array.isArray(s.items)?s.items:[];return items.map(i=>i?.name||i?.kind||'Item').filter(Boolean).join(', ')||'Payment'}
+function saleClientName(s){return db.clients.find(c=>String(c.id)===String(s.client_id))?.name||(s.client_id?'Unknown client':'Walk-in')}
+function saleCollector(s){if(String(s.created_by||'')===String(session?.user?.id||''))return 'Owner';return db.team.find(t=>String(t.auth_user_id||'')===String(s.created_by||''))?.name||'Staff'}
+function finance(){const rev=db.sales.filter(s=>!s.voided_at).reduce((a,s)=>a+Number(s.total||0),0),exp=db.expenses.reduce((a,e)=>a+Number(e.amount||0),0),pending=db.package_orders.filter(o=>o.status==='pending');layout(`<div class="grid three"><div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div><div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div><div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div></div><div class="spacer"></div><div class="card"><h3>Pending package orders</h3>${pending.length?pending.map(o=>{const c=db.clients.find(x=>String(x.id)===String(o.client_id)),m=db.memberships.find(x=>String(x.id)===String(o.membership_id));return `<div class="booking-person"><span><b>${esc(c?.name||'Client')}</b><small>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)} (${o.discount_percent||0}% off)`:''} · Payment Pending</small></span><span><button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change Package</button> <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button> <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button></span></div>`}).join(''):'<div class="empty">No pending package orders.</div>'}</div><div class="spacer"></div><div class="card"><div class="toolbar"><h3 style="margin:0">Payment history</h3><input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px"></div><div id="paymentHistoryRows"></div></div>`,`Finance`,`Owner-only studio financials`);renderPaymentHistory('')}
+function renderPaymentHistory(query=''){const box=$("#paymentHistoryRows");if(!box)return;const q=String(query||'').trim().toLowerCase(),rows=[...db.sales].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).filter(s=>{const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total].join(' ').toLowerCase();return !q||hay.includes(q)});box.innerHTML=rows.length?`<div style="overflow:auto"><table><thead><tr><th>Date / time</th><th>Client</th><th>Paid for</th><th>Method</th><th>Amount</th><th>Recorded by</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr><td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}${s.edited_at?'<div class="muted">Edited</div>':''}</td><td><b>${esc(saleClientName(s))}</b></td><td>${esc(saleWhat(s))}</td><td>${esc(s.payment_method||'—')}</td><td><b>${money(s.total)}</b>${s.voided_at?'<div class="muted">Voided</div>':''}</td><td>${esc(saleCollector(s))}</td><td>${s.voided_at?'<span class="badge">Voided</span>':`<button class="btn small" onclick="editSaleModal('${s.id}')">Edit</button> <button class="btn small danger" onclick="voidSale('${s.id}')">Void</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No matching payments.</div>'}
+function editSaleModal(id){const s=db.sales.find(x=>String(x.id)===String(id));if(!s)return;modal('Edit payment record',`<div class="warning" style="margin-bottom:12px">Owner only. This corrects the payment record and revenue history. It does not automatically change a client's package balance or attendance.</div><div class="form"><div class="full"><label>Client</label><select id="editSaleClient"><option value="">Walk-in / no client</option>${db.clients.map(c=>`<option value="${c.id}" ${String(c.id)===String(s.client_id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="full"><label>Paid for</label><input id="editSaleWhat" value="${esc(saleWhat(s))}"></div><div><label>Amount</label><input id="editSaleAmount" type="number" step=".01" min="0" value="${Number(s.total||0)}"></div><div><label>Payment method</label><select id="editSaleMethod">${['Cash','Card','Whish','Transfer'].map(x=>`<option ${x===s.payment_method?'selected':''}>${x}</option>`).join('')}</select></div><div class="full"><button class="btn primary" onclick="saveSaleEdit('${s.id}')">Save correction</button></div></div>`)}
+async function saveSaleEdit(id){const amount=Number($("#editSaleAmount").value);if(!Number.isFinite(amount)||amount<0)return alert('Enter a valid amount.');const {error}=await sb.rpc('edit_sale_record',{p_sale_id:id,p_client_id:$("#editSaleClient").value||null,p_total:amount,p_payment_method:$("#editSaleMethod").value,p_description:$("#editSaleWhat").value.trim()});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();page='finance';finance();alert('Payment record updated. The edit is logged.')}
+
+async function voidSale(id){const reason=prompt('Reason for voiding this payment:');if(reason===null)return;if(!reason.trim())return alert('Enter a reason.');if(!confirm('Void this payment? It will no longer count in Revenue.'))return;const {error}=await sb.rpc('void_sale_record',{p_sale_id:id,p_reason:reason.trim()});if(error)return alert(error.message);await loadAll();page='finance';finance();alert('Payment voided and kept in history.')}
+
+function ownerCollectPendingPayment(orderId){
+  const o=db.package_orders.find(x=>String(x.id)===String(orderId)),
+        c=db.clients.find(x=>String(x.id)===String(o?.client_id)),
+        m=db.memberships.find(x=>String(x.id)===String(o?.membership_id));
+  if(!o)return alert('Pending order not found.');
+  modal('Collect payment',`<p><b>${esc(c?.name||'Client')}</b></p><p>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)} (${o.discount_percent||0}% off)`:''}</p><label>Payment method</label><select id="ownerPayMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select><button class="btn primary full" id="ownerPayBtn" onclick="ownerConfirmPendingPayment('${orderId}')">Confirm payment & activate package</button><p class="muted">If this client already attended, the session will be reconciled automatically and only once.</p>`)
+}
+async function ownerConfirmPendingPayment(orderId){
+  const btn=$("#ownerPayBtn"),method=$("#ownerPayMethod")?.value||'Cash';
+  if(btn){btn.disabled=true;btn.textContent='Processing…'}
+  const {error}=await sb.rpc('settle_package_order',{p_order_id:orderId,p_payment_method:method});
+  if(error){if(btn){btn.disabled=false;btn.textContent='Confirm payment & activate package'}return alert(error.message)}
+  $("#modal")?.remove();await loadAll();alert('Payment recorded and package activated.')
+}
+function ownerChangePendingPackage(orderId){
+  const o=db.package_orders.find(x=>String(x.id)===String(orderId));
+  if(!o)return alert('Pending order not found.');
+  modal('Change pending package',`<label>Package / session</label><select id="ownerPendingMembership">${db.memberships.map(m=>`<option value="${m.id}" ${String(m.id)===String(o.membership_id)?'selected':''}>${esc(m.name)} — ${money(m.price)}</option>`).join('')}</select><button class="btn primary full" onclick="ownerSavePendingPackage('${orderId}')">Save change</button><p class="muted">This changes the unpaid order only. It does not record revenue until payment is collected.</p>`)
+}
+async function ownerSavePendingPackage(orderId){
+  const membershipId=$("#ownerPendingMembership")?.value;
+  if(!membershipId)return alert('Choose a package.');
+  const {error}=await sb.rpc('change_pending_package_order',{p_order_id:orderId,p_membership_id:String(membershipId)});
+  if(error)return alert(error.message);
+  $("#modal")?.remove();await loadAll();alert('Pending package changed.')
+}
+async function ownerCancelPendingOrder(orderId){
+  if(!confirm('Cancel this pending package order? No revenue has been recorded yet.'))return;
+  const {error}=await sb.rpc('cancel_package_order',{p_order_id:orderId});
+  if(error)return alert(error.message);
+  await loadAll();
+}
+
+function classesTaughtCount(t){if(!t?.auth_user_id)return 0;const now=new Date();return db.classes.filter(c=>String(c.instructor_user_id||'')===String(t.auth_user_id)&&!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<=now).length}
+
+const SHIFT_DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function timeToMinutes(v=''){
+  const [h,m]=String(v).slice(0,5).split(':').map(Number);
+  return (h||0)*60+(m||0);
+}
+
+function instructorShiftSummary(t){
+  const shifts=(db.instructor_shifts||[])
+    .filter(s=>String(s.instructor_user_id)===String(t.auth_user_id))
+    .sort((a,b)=>(a.weekday-b.weekday)||String(a.start_time).localeCompare(String(b.start_time)));
+  if(!shifts.length)return '<span class="muted">No shifts set</span>';
+  return shifts.map(s=>`
+    <div class="shift-summary-line">
+      <b>${SHIFT_DAYS[Number(s.weekday)]}</b>
+      <span>${formatTime(String(s.start_time).slice(0,5))}–${formatTime(String(s.end_time).slice(0,5))}</span>
+      <small>${esc(s.studio_scope||'All')}</small>
+    </div>`).join('');
+}
+
+function instructorShiftsModal(teamId){
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  if(!t?.auth_user_id)return alert('This instructor needs an active login before shifts can be assigned.');
+
+  const shifts=(db.instructor_shifts||[])
+    .filter(s=>String(s.instructor_user_id)===String(t.auth_user_id))
+    .sort((a,b)=>(a.weekday-b.weekday)||String(a.start_time).localeCompare(String(b.start_time)));
+
+  modal(`${esc(t.name)} · Weekly shifts`,`
+    <div class="shift-modal-copy">
+      <p>Set the hours ${esc(t.name)} normally covers. Core Theory will automatically put her name on <b>unassigned</b> classes that fall inside these shifts.</p>
+      <p class="muted">Classes that already have an instructor stay unchanged. If two instructors overlap the same class, Core Theory leaves that class unassigned so you can choose manually.</p>
+    </div>
+
+    <div id="shiftRows">
+      ${shifts.map(shiftRowHtml).join('')}
+    </div>
+
+    <button class="btn" type="button" onclick="addShiftRow()">+ Add shift</button>
+
+    <div class="full" style="margin-top:16px">
+      <button class="btn primary" type="button" onclick="saveInstructorShifts('${t.id}','${t.auth_user_id}')">Save shifts & assign classes</button>
+    </div>
+  `);
+
+  if(!shifts.length)addShiftRow();
+}
+
+function shiftRowHtml(s={}){
+  const id=s.id||crypto.randomUUID();
+  return `
+    <div class="shift-edit-row" data-shift-row data-id="${id}">
+      <div>
+        <label>Day</label>
+        <select class="shift-day">
+          ${SHIFT_DAYS.map((d,i)=>`<option value="${i}" ${Number(s.weekday)===i?'selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>From</label>
+        <input class="shift-start" type="time" value="${String(s.start_time||'08:00').slice(0,5)}">
+      </div>
+      <div>
+        <label>To</label>
+        <input class="shift-end" type="time" value="${String(s.end_time||'13:00').slice(0,5)}">
+      </div>
+      <div>
+        <label>Studio</label>
+        <select class="shift-studio">
+          <option value="All" ${(s.studio_scope||'All')==='All'?'selected':''}>All</option>
+          <option value="Pilates" ${s.studio_scope==='Pilates'?'selected':''}>Pilates</option>
+          <option value="Megacore" ${s.studio_scope==='Megacore'?'selected':''}>Megacore</option>
+        </select>
+      </div>
+      <button class="btn small danger shift-remove" type="button" onclick="this.closest('[data-shift-row]').remove()">×</button>
+    </div>`;
+}
+
+function addShiftRow(){
+  const box=document.getElementById('shiftRows');
+  if(box)box.insertAdjacentHTML('beforeend',shiftRowHtml({weekday:1,start_time:'08:00',end_time:'13:00',studio_scope:'All'}));
+}
+
+async function saveInstructorShifts(teamId,userId){
+  const rows=[...document.querySelectorAll('[data-shift-row]')].map(r=>({
+    weekday:Number(r.querySelector('.shift-day').value),
+    start_time:r.querySelector('.shift-start').value,
+    end_time:r.querySelector('.shift-end').value,
+    studio_scope:r.querySelector('.shift-studio').value
+  }));
+
+  for(const r of rows){
+    if(!r.start_time||!r.end_time)return alert('Add both a start and end time.');
+    if(timeToMinutes(r.end_time)<=timeToMinutes(r.start_time))
+      return alert(`${SHIFT_DAYS[r.weekday]}: the end time must be after the start time.`);
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {data,error}=await sb.rpc('set_instructor_weekly_shifts',{
+    p_instructor_user_id:String(userId),
+    p_shifts:rows
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save shifts & assign classes'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const assigned=Number(data?.assigned||0);
+  const ambiguous=Number(data?.ambiguous||0);
+  let msg=`Shifts saved. ${assigned} class${assigned===1?' was':'es were'} assigned automatically.`;
+  if(ambiguous)msg+=` ${ambiguous} class${ambiguous===1?' has':'es have'} overlapping instructor shifts and were left unassigned.`;
+  alert(msg);
+}
+
+async function autoAssignUnassignedClasses(showResult=true){
+  const {data,error}=await sb.rpc('auto_assign_classes_from_shifts');
+  if(error)return alert(error.message);
+  await loadAll();
+  if(showResult){
+    const assigned=Number(data?.assigned||0),ambiguous=Number(data?.ambiguous||0);
+    alert(`${assigned} class${assigned===1?'':'es'} assigned.${ambiguous?` ${ambiguous} overlapping class${ambiguous===1?'':'es'} left unassigned.`:''}`);
+  }
+}
+
+function applyInstructorShiftStyles(){
+  if(document.getElementById('coreTheoryInstructorShiftStyles'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryInstructorShiftStyles';
+  s.textContent=`
+    .shift-summary-line{
+      display:grid;
+      grid-template-columns:78px 1fr auto;
+      gap:8px;
+      align-items:center;
+      margin:3px 0;
+      font-size:12px;
+    }
+    .shift-summary-line small{
+      padding:2px 6px;
+      border-radius:999px;
+      background:rgba(114,47,55,.08);
+      color:#722F37;
+    }
+    .shift-edit-row{
+      display:grid;
+      grid-template-columns:1.25fr 1fr 1fr 1.1fr auto;
+      gap:8px;
+      align-items:end;
+      padding:12px 0;
+      border-bottom:1px solid rgba(0,0,0,.08);
+    }
+    .shift-remove{margin-bottom:1px}
+    .shift-modal-copy{margin-bottom:8px}
+    @media(max-width:700px){
+      .shift-edit-row{
+        grid-template-columns:1fr 1fr;
+      }
+      .shift-edit-row>div:first-child,
+      .shift-edit-row>div:nth-child(4){
+        grid-column:1/-1;
+      }
+      .shift-remove{width:100%}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+function team(){
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button>
+        <button class="btn" onclick="teamModal()">+ Add non-login team member</button>
+        <button class="btn" onclick="autoAssignUnassignedClasses()">↻ Assign schedule from shifts</button>
+      </div>
+
+      <div class="warning" style="margin-bottom:14px">
+        Set each instructor's weekly shifts here. Unassigned classes that fall inside exactly one instructor's shift are assigned automatically.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Role</th>
+            <th>Weekly shifts</th><th>Classes taught</th><th>Rate / commission</th><th>Login</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${db.team.map(t=>`
+            <tr>
+              <td><b>${esc(t.name)}</b></td>
+              <td>${esc(t.email||'—')}</td>
+              <td>${esc(t.phone||'')}</td>
+              <td>${esc(t.role||'')}</td>
+              <td>${t.role==='Instructor'&&t.auth_user_id?instructorShiftSummary(t):'<span class="muted">—</span>'}</td>
+              <td><b>${classesTaughtCount(t)}</b></td>
+              <td>${esc(t.rate||'')}</td>
+              <td><span class="badge ${t.invite_status==='active'?'good':''}">${esc(t.invite_status||'No login')}</span></td>
+              <td>
+                <button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>
+                ${t.role==='Instructor'&&t.auth_user_id?`<button class="btn small" onclick="instructorShiftsModal('${t.id}')">Shifts</button>`:''}
+                ${t.email?`
+                  <button class="btn small" onclick="resendInstructorInvite('${t.id}')">Resend invite</button>
+                  ${t.auth_user_id?`
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>
+                    <button class="btn small danger" onclick="toggleInstructorAccess('${t.id}',${t.invite_status==='disabled'?'true':'false'})">${t.invite_status==='disabled'?'Reactivate':'Deactivate login'}</button>
+                  `:''}
+                `:''}
+                ${!t.auth_user_id?`<button class="btn small danger" onclick="removeItem('team','${t.id}')">Delete</button>`:''}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`,
+    `Team`,
+    `Instructor shifts, activity, access and private pay information`
+  );
+}
+
+function inviteInstructorModal(){modal('Invite Instructor',`<div class="form"><div><label>Full name</label><input id="iname" required></div><div><label>Email</label><input id="iemail" type="email" required></div><div><label>Phone number</label><input id="iphone" type="tel" required></div><div><label>Rate / commission</label><input id="irate" placeholder="$20/class or 30%"></div><div class="full"><p class="muted">They'll receive an email invitation and create their own password. Their account will automatically be Instructor access.</p><button class="btn primary" onclick="inviteInstructor()">Send invitation</button></div></div>`)}
+async function callStaffAdmin(payload){const {data,error}=await sb.functions.invoke('manage-instructors',{body:payload});if(error)throw new Error(error.message);if(data?.error)throw new Error(data.error);return data}
+async function inviteInstructor(){const name=$("#iname").value.trim(),email=$("#iemail").value.trim().toLowerCase(),phone=$("#iphone").value.trim(),rate=$("#irate").value.trim();if(!name||!email||!phone)return alert('Name, email and phone are required.');const btn=document.querySelector('#modal .btn.primary');btn.disabled=true;btn.textContent='Sending…';try{const r=await callStaffAdmin({action:'invite',name,email,phone,redirectTo:location.origin});const {error}=await sb.from('team').insert({name,email,phone,role:'Instructor',rate,auth_user_id:r.user_id,invite_status:'pending'});if(error)throw error;$("#modal").remove();await loadAll();alert('Instructor invitation sent.')}catch(e){alert(e.message)}finally{if(btn){btn.disabled=false;btn.textContent='Send invitation'}}}
+async function resendInstructorInvite(id){const t=db.team.find(x=>String(x.id)===String(id));if(!t?.email)return;try{await callStaffAdmin({action:'invite',name:t.name,email:t.email,phone:t.phone,redirectTo:location.origin,resend:true});await sb.from('team').update({invite_status:'pending'}).eq('id',id);await loadAll();alert('Invitation sent.')}catch(e){alert(e.message)}}
+async function toggleInstructorAccess(id,enable){const t=db.team.find(x=>String(x.id)===String(id));if(!t?.auth_user_id)return alert('No login is linked to this team member.');if(!confirm(enable?'Reactivate this instructor login?':'Deactivate this instructor login?'))return;try{await callStaffAdmin({action:enable?'activate':'deactivate',user_id:t.auth_user_id});await sb.from('team').update({invite_status:enable?'active':'disabled'}).eq('id',id);await loadAll()}catch(e){alert(e.message)}}
+async function setFrontDeskDuty(userId,active){if(!isOwner())return;const {error}=await sb.rpc('set_front_desk_duty',{p_user_id:userId,p_active:active});if(error)return alert(error.message);alert(active?'Front Desk Duty is active for this instructor today.':'Front Desk Duty ended.');await loadAll();}
+function teamModal(){modal('Add team member',`<div class="form"><div><label>Name</label><input id="tname"></div><div><label>Role</label><input id="trole" value="Staff"></div><div><label>Phone</label><input id="tphone"></div><div><label>Rate / commission</label><input id="trate"></div><div class="full"><button class="btn primary" onclick="addTeam()">Save</button></div></div>`)}
+function editTeamMember(id){const t=db.team.find(x=>String(x.id)===String(id));if(!t)return;modal('Edit team member',`<div class="form"><div><label>Name</label><input id="tname" value="${esc(t.name||'')}"></div><div><label>Role</label><input id="trole" value="${esc(t.role||'')}"></div><div><label>Phone</label><input id="tphone" value="${esc(t.phone||'')}"></div><div><label>Rate / commission</label><input id="trate" value="${esc(t.rate||'')}"></div><div class="full"><button class="btn primary" onclick="saveTeamMember('${t.id}')">Save changes</button></div></div>`)}
+async function addTeam(){const {error}=await sb.from('team').insert({name:$("#tname").value,role:$("#trole").value,phone:$("#tphone").value,rate:$("#trate").value,invite_status:'none'});if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveTeamMember(id){const {error}=await sb.from('team').update({name:$("#tname").value.trim(),role:$("#trole").value.trim(),phone:$("#tphone").value.trim(),rate:$("#trate").value.trim()}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Team member updated.')}
+function operations(){const ss=db.studio_settings[0]||{};const todayClasses=db.classes.filter(c=>c.class_date===today());const low=db.clients.filter(c=>Number(c.sessions||0)<=1);layout(`<div class="grid two"><div class="card"><h3>Booking rules</h3><div class="form"><div><label>Free cancellation (hours before)</label><input id="cancelHours" type="number" value="${ss.cancellation_hours??12}"></div><div><label>Booking closes (hours before)</label><input id="closeHours" type="number" value="${ss.booking_close_hours??1}"></div><div><label>Book up to (days ahead)</label><input id="aheadDays" type="number" value="${ss.booking_ahead_days??30}"></div><div><label>Late cancel deducts session</label><select id="lateDeduct"><option value="true" ${ss.late_cancel_deduct!==false?'selected':''}>Yes</option><option value="false" ${ss.late_cancel_deduct===false?'selected':''}>No</option></select></div><div><label>No-show deducts session</label><select id="noShowDeduct"><option value="true" ${ss.no_show_deduct!==false?'selected':''}>Yes</option><option value="false" ${ss.no_show_deduct===false?'selected':''}>No</option></select></div><div class="full"><button class="btn primary" onclick="saveStudioRules()">Save rules</button></div></div></div><div class="card"><h3>Announcements</h3><div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>${db.announcements.map(a=>`<div class="cart-row"><span><b>${esc(a.title)}</b><small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small></span><span><button class="btn small" onclick="announcementModal('${a.id}')">Edit</button> <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button> <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No announcements.</div>'}</div><div class="card"><h3>Promo codes</h3><div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>${db.promo_codes.map(p=>`<div class="cart-row"><span><b>${esc(p.code)}</b><small>${p.discount_percent}% off · ${p.active?'Active':'Inactive'}</small></span><span><button class="btn small" onclick="promoModal('${p.id}')">Edit</button> <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="removeItem('promo_codes','${p.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No promo codes.</div>'}</div><div class="card"><h3>Studio alerts</h3><div class="cart-row"><span>Clients with ≤1 session</span><b>${low.length}</b></div><div class="cart-row"><span>Classes today</span><b>${todayClasses.length}</b></div><div class="cart-row"><span>Waitlisted bookings</span><b>${db.bookings.filter(b=>b.status==='waitlist').length}</b></div></div><div class="card"><h3>Data & reports</h3><p class="muted">Export your current studio data for reporting or backup.</p><button class="btn" onclick="exportData()">Export backup JSON</button> <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button></div><div class="card"><h3>Audit log</h3>${db.audit_log.slice(-20).reverse().map(a=>`<div class="cart-row"><span><b>${esc(a.action)}</b><small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small></span></div>`).join('')||'<div class="empty">Activity will appear here.</div>'}</div></div>`,`Operations`,`Rules, waitlists, promos, announcements, exports and audit trail`) }
+async function saveStudioRules(){const row={id:1,cancellation_hours:+$('#cancelHours').value,booking_close_hours:+$('#closeHours').value,booking_ahead_days:+$('#aheadDays').value,late_cancel_deduct:$('#lateDeduct').value==='true',no_show_deduct:$('#noShowDeduct').value==='true'};const {error}=await sb.from('studio_settings').upsert(row);if(error)return alert(error.message);await loadAll();alert('Booking rules saved.')}
+function announcementModal(id=''){const a=id?db.announcements.find(x=>String(x.id)===String(id)):null;modal(a?'Edit announcement':'New announcement',`<label>Title</label><input id="annTitle" value="${esc(a?.title||'')}"><label>Message</label><textarea id="annMsg">${esc(a?.message||'')}</textarea><label>Show to</label><select id="annAudience"><option ${(!a||a.audience==='Everyone'||!a.audience)?'selected':''}>Everyone</option><option ${a?.audience==='Clients'?'selected':''}>Clients</option><option ${a?.audience==='Instructors'?'selected':''}>Instructors</option></select><label>Status</label><select id="annActive"><option value="true" ${a?.active!==false?'selected':''}>Active</option><option value="false" ${a?.active===false?'selected':''}>Inactive</option></select><button class="btn primary full" onclick="${a?`saveAnnouncement('${a.id}')`:'addAnnouncement()'}">${a?'Save changes':'Publish'}</button>`)}
+async function addAnnouncement(){const {error}=await sb.from('announcements').insert({title:$('#annTitle').value,message:$('#annMsg').value,audience:$('#annAudience').value,active:$('#annActive').value==='true',created_by:session.user.id});if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function saveAnnouncement(id){const {error}=await sb.from('announcements').update({title:$('#annTitle').value,message:$('#annMsg').value,audience:$('#annAudience').value,active:$('#annActive').value==='true'}).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Announcement updated.')}
+async function toggleAnnouncement(id,active){const {error}=await sb.from('announcements').update({active}).eq('id',id);if(error)return alert(error.message);await loadAll()}
+function promoModal(id=''){const p=id?db.promo_codes.find(x=>String(x.id)===String(id)):null;modal(p?'Edit promo code':'New promo code',`<label>Code</label><input id="promoCode" value="${esc(p?.code||'')}"><label>Discount %</label><input id="promoPct" type="number" min="0" max="100" value="${p?.discount_percent??''}"><label>Status</label><select id="promoActive"><option value="true" ${p?.active!==false?'selected':''}>Active</option><option value="false" ${p?.active===false?'selected':''}>Inactive</option></select><button class="btn primary full" onclick="${p?`savePromo('${p.id}')`:'addPromo()'}">${p?'Save changes':'Save'}</button>`)}
+async function addPromo(){const {error}=await sb.from('promo_codes').insert({code:$('#promoCode').value.trim().toUpperCase(),discount_percent:+$('#promoPct').value,active:$('#promoActive').value==='true'});if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function savePromo(id){const {error}=await sb.from('promo_codes').update({code:$('#promoCode').value.trim().toUpperCase(),discount_percent:+$('#promoPct').value,active:$('#promoActive').value==='true'}).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Promo code updated.')}
+async function togglePromo(id,active){const {error}=await sb.from('promo_codes').update({active}).eq('id',id);if(error)return alert(error.message);await loadAll()}
+
+function exportData(){const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='core-theory-backup-'+today()+'.json';a.click();URL.revokeObjectURL(a.href)}function exportClientsCSV(){const rows=[['Name','Email','Phone','Package','Sessions','Expiry'],...db.clients.map(c=>[c.name,c.email,c.phone,c.package,c.sessions,c.expiry])];const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='core-theory-clients-'+today()+'.csv';a.click()}
+function customSectionPage(id){const sec=db.custom_sections.find(x=>String(x.id)===String(id));if(!sec)return page='dashboard',render();const entries=db.custom_entries.filter(x=>String(x.section_id)===String(id));layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="customEntryModal('${id}')">+ Add item</button><button class="btn" onclick="customSectionModal('${id}')">Edit section</button></div>${entries.map(e=>`<div class="cart-row"><span><b>${esc(e.title)}</b><small>${esc(e.notes||'')}</small></span><span><button class="btn small" onclick="customEntryModal('${id}','${e.id}')">Edit</button> <button class="btn small danger" onclick="removeItem('custom_entries','${e.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No items yet.</div>'}</div>`,sec.name,'Custom Core Theory section')}
+function customEntryModal(sectionId,entryId=''){const e=entryId?db.custom_entries.find(x=>String(x.id)===String(entryId)):null;modal(e?'Edit item':'Add item',`<label>Title</label><input id="ceTitle" value="${esc(e?.title||'')}"><label>Notes / details</label><textarea id="ceNotes">${esc(e?.notes||'')}</textarea><button class="btn primary full" onclick="${e?`saveCustomEntry('${e.id}')`:`addCustomEntry('${sectionId}')`}">${e?'Save changes':'Save'}</button>`)}
+async function addCustomEntry(id){const {error}=await sb.from('custom_entries').insert({section_id:id,title:$('#ceTitle').value,notes:$('#ceNotes').value,created_by:session.user.id});if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function saveCustomEntry(id){const {error}=await sb.from('custom_entries').update({title:$('#ceTitle').value,notes:$('#ceNotes').value}).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Item updated.')}
+function customSectionModal(id=''){const s=id?db.custom_sections.find(x=>String(x.id)===String(id)):null;modal(s?'Edit menu section':'Add menu section',`<label>Section name</label><input id="csName" value="${esc(s?.name||'')}" placeholder="Cleaning Checklist"><label>Icon</label><input id="csIcon" value="${esc(s?.icon||'•')}" maxlength="4"><label>Type</label><select id="csType">${['List','Notes','Checklist','Table'].map(x=>`<option ${x.toLowerCase()===String(s?.section_type||'list').toLowerCase()?'selected':''}>${x}</option>`).join('')}</select><button class="btn primary full" onclick="${s?`saveCustomSection('${s.id}')`:'addCustomSection()'}">${s?'Save changes':'Add to menu'}</button>`)}
+async function addCustomSection(){const {error}=await sb.from('custom_sections').insert({name:$('#csName').value,icon:$('#csIcon').value||'•',section_type:$('#csType').value.toLowerCase(),visible_owner:true,sort_order:100});if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function saveCustomSection(id){const {error}=await sb.from('custom_sections').update({name:$('#csName').value,icon:$('#csIcon').value||'•',section_type:$('#csType').value.toLowerCase()}).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Section updated.')}
+
+function settings(){const n=db.notification_settings[0]||{};layout(`<div class="grid two"><div class="card"><h3>Class level colors</h3>${db.class_levels.map(l=>`<div class="level-setting"><span>${esc(l.name)}</span><input type="color" value="${esc(l.color)}" onchange="changeLevelColor('${l.id}',this.value)"></div>`).join('')}</div><div class="card"><h3>Booking notifications</h3><p class="muted">Core Theory automatically queues a confirmation when a client books and a reminder for the night before.</p><div class="form"><div><label>Night-before reminder time</label><input id="nTime" type="time" value="${esc((n.reminder_time||'20:00').slice(0,5))}"></div><div><label>Time zone</label><input id="nZone" value="${esc(n.timezone||'Asia/Beirut')}"></div><div><label><input id="nEmailOn" type="checkbox" ${n.email_enabled!==false?'checked':''}> Email reminders</label></div><div><label><input id="nWaOn" type="checkbox" ${n.whatsapp_enabled?'checked':''}> WhatsApp reminders</label></div><div><label>Sender name</label><input id="nSender" value="${esc(n.sender_name||'Core Theory')}"></div><div><label>Sender email</label><input id="nEmail" type="email" value="${esc(n.sender_email||'')}" placeholder="bookings@yourdomain.com"></div><div class="full"><label>WhatsApp Business number</label><input id="nPhone" value="${esc(n.whatsapp_number||'')}" placeholder="+961..."></div><div class="full"><button class="btn primary" onclick="saveNotificationSettings()">Save notification settings</button></div></div><p class="warning">Email/WhatsApp delivery becomes live after a provider is connected. Until then, confirmations and reminders are safely queued with their scheduled send times.</p></div><div class="card"><h3>Menu & Custom Sections</h3><p class="muted">Create your own Owner menu pages for things like cleaning, equipment, suppliers or tasks.</p><button class="btn primary" onclick="customSectionModal()">+ Add Section</button>${db.custom_sections.map(x=>`<div class="cart-row"><span>${esc(x.icon||'•')} <b>${esc(x.name)}</b><small>${esc(x.section_type||'list')}</small></span><span><button class="btn small" onclick="customSectionModal('${x.id}')">Edit</button> <button class="btn small danger" onclick="removeItem('custom_sections','${x.id}')">Delete</button></span></div>`).join('')}</div><div class="card"><h3>App & account</h3><p class="muted">Core Theory is PWA-ready and can be added to a phone home screen from the browser.</p><button class="btn" onclick="setPasswordScreen()">Change password</button></div><div class="card"><h3>Notification queue</h3>${db.notification_queue.slice(0,10).map(q=>`<div class="cart-row"><span><b>${esc(q.kind)}</b><small>${esc(q.channel)} · ${new Date(q.scheduled_for).toLocaleString()}</small></span><span class="badge">${esc(q.status)}</span></div>`).join('')||'<div class="empty">No notifications queued yet.</div>'}</div></div>`,`Settings`,`Customize classes, reminders and account`) }
+async function saveNotificationSettings(){const row={id:1,reminder_time:$("#nTime").value||'20:00',timezone:$("#nZone").value||'Asia/Beirut',email_enabled:$("#nEmailOn").checked,whatsapp_enabled:$("#nWaOn").checked,sender_name:$("#nSender").value.trim()||'Core Theory',sender_email:$("#nEmail").value.trim(),whatsapp_number:$("#nPhone").value.trim(),updated_at:new Date().toISOString()};const {error}=await sb.from('notification_settings').upsert(row);if(error)return alert(error.message);await loadAll();alert('Notification settings saved.')}async function changeLevelColor(id,color){const {error}=await sb.from('class_levels').update({color}).eq('id',id);if(error)return alert(error.message);await loadAll()}
+function account(){layout(`<div class="card compact-card"><h3>${esc(profile?.full_name||'Instructor')}</h3><p>${esc(session.user.email)}</p><p class="muted">You can see only your assigned classes and the booked client names needed for attendance. Client lists, expenses, finance and other instructors’ schedules remain private.</p><button class="btn" onclick="setPasswordScreen()">Set / change password</button></div>`,`Account`,`Instructor access`)}
+function clientModal(id=''){const c=id?db.clients.find(x=>String(x.id)===String(id)):null;modal(c?'Edit client':'Add client',`<div class="form"><div><label>Name</label><input id="cname" value="${esc(c?.name||'')}"></div><div><label>Phone</label><input id="cphone" value="${esc(c?.phone||'')}"></div><div><label>Email</label><input id="cemail" type="email" value="${esc(c?.email||'')}"></div><div class="full"><button class="btn primary" onclick="${c?`saveClient('${c.id}')`:'addClient()'}">${c?'Save changes':'Save'}</button></div></div>`)}
+async function addClient(){const {error}=await sb.from('clients').insert({name:$("#cname").value.trim(),phone:$("#cphone").value.trim(),email:$("#cemail").value.trim(),sessions:0});if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveClient(id){const {error}=await sb.from('clients').update({name:$("#cname").value.trim(),phone:$("#cphone").value.trim(),email:$("#cemail").value.trim()}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Client updated.')}
+async function deleteClient(id){if(!confirm('Delete this client? This is only allowed if they have no bookings, sales or package orders.'))return;const {error}=await sb.rpc('owner_delete_client',{p_client_id:id});if(error)return alert(error.message);await loadAll();alert('Client deleted.')}
+
+function modal(title,body){$("#modal")?.remove();document.body.insertAdjacentHTML('beforeend',`<div class="modal-wrap" id="modal"><div class="modal"><div class="row modal-head"><h2>${title}</h2><button class="btn" onclick="$('#modal').remove()">×</button></div>${body}</div></div>`)}async function removeItem(table,id){if(!isOwner())return;if(!confirm('Delete this item?'))return;const {error}=await sb.from(table).delete().eq('id',id);if(error)return alert(error.message);await loadAll()}
+async function init(){const recovery=location.hash.includes('type=recovery')||location.hash.includes('type=invite')||location.search.includes('type=recovery')||location.search.includes('type=invite');const {data}=await sb.auth.getSession();session=data.session;sb.auth.onAuthStateChange(async(event,s)=>{session=s;if(event==='PASSWORD_RECOVERY')return setPasswordScreen();if(!s)return authScreen()});if(!session)return authScreen();if(recovery)return setPasswordScreen();await loadAll();if('serviceWorker'in navigator)navigator.serviceWorker.register('./service-worker.js').catch(()=>{})}
+
+// ================= CORE THEORY V8 OPERATIONS =================
+
+// Birthday required for every new client account.
+function signupScreen(msg=""){$("#app").innerHTML=`<div class="auth-shell"><div class="auth-card"><div class="auth-brand">CORE THEORY<small>CLIENT ACCOUNT</small></div><h2>Create account</h2><form id="signupForm"><label>Full name</label><input id="suName" required><label>Birthday</label><input id="suBirthday" type="date" required><label>Email</label><input id="suEmail" type="email" required><label>Country / calling code</label><select id="suCountry" required>${countryOptions()}</select><label>Phone number</label><input id="suPhone" type="tel" placeholder="e.g. 70123456" required><small class="muted">Choose your country first. Core Theory saves the full international number.</small><label>Password</label><input id="suPass" type="password" minlength="8" required><button class="btn primary full" type="submit">Create account</button><div class="auth-error" id="authError">${esc(msg)}</div></form><button class="link-btn" onclick="authScreen()">← Back to sign in</button></div></div>`;$("#signupForm").onsubmit=signup}
+async function signup(e){e.preventDefault();const code=$("#suCountry").value.trim(),raw=$("#suPhone").value.trim().replace(/^0+/,'').replace(/\s+/g,''),birthday=$("#suBirthday").value;if(!birthday)return $("#authError").textContent="Birthday is required.";if(!code)return $("#authError").textContent="Please choose a country with a calling code.";if(!raw)return $("#authError").textContent="Phone number is required.";const phone=code+raw;const {error}=await sb.auth.signUp({email:$("#suEmail").value.trim(),password:$("#suPass").value,options:{emailRedirectTo:location.origin,data:{full_name:$("#suName").value.trim(),birthday,phone,phone_country_code:code}}});if(error)return $("#authError").textContent=error.message;authScreen("Account created. Check your email to confirm, then sign in.")}
+
+function monthStart(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`}
+function salesActive(){return db.sales.filter(s=>!s.voided_at)}
+function saleItems(s){return Array.isArray(s.items)?s.items:[]}
+function revenueForScope(scope){return salesActive().reduce((sum,s)=>sum+saleItems(s).reduce((a,i)=>{if(i.kind!=='membership')return a;const m=db.memberships.find(x=>String(x.id)===String(i.id));return a+((m?.studio_scope||'Both')===scope?Number(i.price||0):0)},0),0)}
+function occupancyStats(){const past=db.classes.filter(c=>!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date());const cap=past.reduce((a,c)=>a+Number(c.capacity||0),0),booked=past.reduce((a,c)=>a+db.bookings.filter(b=>String(b.class_id)===String(c.id)&&['checked_in','no_show','booked'].includes(b.status)).length,0);return {booked,cap,pct:cap?Math.round(booked/cap*100):0}}
+
+function dashboard(){const activeSales=salesActive(),rev=activeSales.reduce((a,s)=>a+Number(s.total||0),0),exp=db.expenses.reduce((a,e)=>a+Number(e.amount||0),0),todayRev=activeSales.filter(s=>String(s.created_at||'').slice(0,10)===today()).reduce((a,s)=>a+Number(s.total||0),0),monthRev=activeSales.filter(s=>String(s.created_at||'').slice(0,10)>=monthStart()).reduce((a,s)=>a+Number(s.total||0),0),monthExp=db.expenses.filter(e=>String(e.expense_date||'')>=monthStart()).reduce((a,e)=>a+Number(e.amount||0),0),pending=db.package_orders.filter(o=>o.status==='pending').length,low=db.clients.filter(c=>Number(c.sessions||0)<=1).length,expiring=db.clients.filter(c=>c.expiry&&c.expiry>=today()&&c.expiry<=dateISO(new Date(Date.now()+7*86400000))).length,occ=occupancyStats();layout(`<div class="grid kpis"><div class="card kpi"><div class="label">Revenue today</div><div class="value">${money(todayRev)}</div></div><div class="card kpi"><div class="label">Revenue this month</div><div class="value">${money(monthRev)}</div></div><div class="card kpi"><div class="label">Month profit</div><div class="value">${money(monthRev-monthExp)}</div></div><div class="card kpi"><div class="label">Occupancy</div><div class="value">${occ.pct}%</div></div></div><div class="spacer"></div><div class="grid three"><div class="card"><h3>Studio alerts</h3><div class="cart-row"><span>Pending payments</span><b>${pending}</b></div><div class="cart-row"><span>Clients with ≤1 session</span><b>${low}</b></div><div class="cart-row"><span>Packages expiring in 7 days</span><b>${expiring}</b></div><div class="cart-row"><span>Low-stock products</span><b>${db.products.filter(p=>Number(p.stock||0)<=Number(p.minimum_stock||0)).length}</b></div></div><div class="card"><h3>Revenue mix</h3><div class="cart-row"><span>Pilates</span><b>${money(revenueForScope('Pilates'))}</b></div><div class="cart-row"><span>Megacore</span><b>${money(revenueForScope('Megacore'))}</b></div><div class="cart-row"><span>Both packages</span><b>${money(revenueForScope('Both'))}</b></div></div><div class="card"><h3>Totals</h3><div class="cart-row"><span>All revenue</span><b>${money(rev)}</b></div><div class="cart-row"><span>All expenses</span><b>${money(exp)}</b></div><div class="cart-row"><span>Estimated profit</span><b>${money(rev-exp)}</b></div></div></div><div class="spacer"></div><div class="card"><h3>Today's classes</h3>${db.classes.filter(c=>c.class_date===today()&&!c.cancelled).map(classCard).join('')||'<div class="empty">No classes today.</div>'}</div>`,`Dashboard`,`Studio performance, alerts and today's operations`)}
+
+function clientProfile(id,tab='overview'){const c=db.clients.find(x=>String(x.id)===String(id));if(!c)return;const bookings=db.bookings.filter(b=>String(b.client_id)===String(id)),packages=db.client_packages.filter(p=>String(p.client_id)===String(id)).sort((a,b)=>String(b.purchased_at||'').localeCompare(String(a.purchased_at||''))),payments=db.sales.filter(s=>String(s.client_id)===String(id)).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))),upcoming=bookings.map(b=>({b,cl:db.classes.find(x=>String(x.id)===String(b.class_id))})).filter(x=>x.cl&&x.b.status!=='cancelled'&&new Date(`${x.cl.class_date}T${String(x.cl.class_time||'00:00').slice(0,8)}`)>=new Date()).sort((a,b)=>(a.cl.class_date+a.cl.class_time).localeCompare(b.cl.class_date+b.cl.class_time))[0],visits=bookings.filter(b=>b.status==='checked_in').length;const tabs=`<div class="schedule-tabs"><button class="tab ${tab==='overview'?'active':''}" onclick="clientProfile('${id}','overview')">Overview</button><button class="tab ${tab==='packages'?'active':''}" onclick="clientProfile('${id}','packages')">Packages</button><button class="tab ${tab==='attendance'?'active':''}" onclick="clientProfile('${id}','attendance')">Attendance</button><button class="tab ${tab==='payments'?'active':''}" onclick="clientProfile('${id}','payments')">Payments</button><button class="tab ${tab==='notes'?'active':''}" onclick="clientProfile('${id}','notes')">Notes</button></div>`;let body='';if(tab==='overview')body=`<div class="grid two"><div><p><b>Email:</b> ${esc(c.email||'—')}</p><p><b>Phone:</b> ${esc(c.phone||'—')}</p><p><b>Birthday:</b> ${esc(c.birthday||'—')}</p><p><b>Total visits:</b> ${visits}</p></div><div><p><b>Current package:</b> ${esc(c.package||'—')}</p><p><b>Sessions:</b> ${c.sessions??0}</p><p><b>Expiry:</b> ${esc(c.expiry||'—')}</p><p><b>Next class:</b> ${upcoming?`${esc(upcoming.cl.class_type)} · ${esc(upcoming.cl.class_date)}`:'—'}</p></div></div><div class="toolbar"><button class="btn" onclick="clientModal('${id}')">Edit client</button><button class="btn" onclick="sellMembership('${id}')">Add package</button><button class="btn" onclick="freezeClientModal('${id}')">Freeze package</button></div>`;if(tab==='packages')body=packages.map(p=>`<div class="cart-row"><span><b>${esc(p.package_name)}</b><small>${esc(p.status)} · ${p.sessions_remaining===999?'Unlimited':p.sessions_remaining+' / '+p.sessions_total+' left'} · ${esc(p.studio_scope||'Both')} · ${p.expiry||'No expiry'}</small></span><span>${p.price_paid!=null?money(p.price_paid):''}</span></div>`).join('')||'<div class="empty">No package history.</div>';if(tab==='attendance')body=bookings.map(b=>{const cl=db.classes.find(x=>String(x.id)===String(b.class_id));return `<div class="cart-row"><span><b>${esc(cl?.class_type||'Class')}</b><small>${esc(cl?.class_date||'')} · ${esc(cl?.studio_type||'')}</small></span><span class="badge">${esc(b.status)}</span></div>`}).join('')||'<div class="empty">No attendance history.</div>';if(tab==='payments')body=payments.map(s=>`<div class="cart-row"><span><b>${esc(saleWhat(s))}</b><small>${new Date(s.created_at).toLocaleString()} · ${esc(s.payment_method||'')}${s.voided_at?' · VOIDED':''}</small></span><span><b>${money(s.total)}</b> <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button></span></div>`).join('')||'<div class="empty">No payment history.</div>';if(tab==='notes')body=`<label>Internal notes</label><textarea id="clientInternalNotes">${esc(c.internal_notes||'')}</textarea><button class="btn primary" onclick="saveClientNotes('${id}')">Save notes</button>`;modal(esc(c.name),tabs+`<div style="margin-top:14px">${body}</div>`)}
+function clientHistory(id){clientProfile(id,'overview')}
+async function saveClientNotes(id){const {error}=await sb.from('clients').update({internal_notes:$("#clientInternalNotes").value}).eq('id',id);if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Notes saved.')}
+function freezeClientModal(id){modal('Freeze package',`<label>Freeze for how many days?</label><input id="freezeDays" type="number" min="1" value="7"><button class="btn primary full" onclick="freezeClient('${id}')">Freeze & extend expiry</button>`)}
+async function freezeClient(id){const days=Number($("#freezeDays").value);if(!Number.isFinite(days)||days<1)return alert('Enter a valid number of days.');const {error}=await sb.rpc('owner_freeze_client_package',{p_client_id:id,p_days:days});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Package frozen and expiry extended.')}
+
+function clientModal(id=''){const c=id?db.clients.find(x=>String(x.id)===String(id)):null;modal(c?'Edit client':'Add client',`<div class="form"><div><label>Name</label><input id="cname" value="${esc(c?.name||'')}"></div><div><label>Birthday</label><input id="cbirthday" type="date" value="${esc(c?.birthday||'')}"></div><div><label>Phone</label><input id="cphone" value="${esc(c?.phone||'')}"></div><div><label>Email</label><input id="cemail" type="email" value="${esc(c?.email||'')}"></div><div class="full"><button class="btn primary" onclick="${c?`saveClient('${c.id}')`:'addClient()'}">${c?'Save changes':'Save'}</button></div></div>`)}
+async function addClient(){const {error}=await sb.from('clients').insert({name:$("#cname").value.trim(),birthday:$("#cbirthday").value||null,phone:$("#cphone").value.trim(),email:$("#cemail").value.trim(),sessions:0});if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveClient(id){const {error}=await sb.from('clients').update({name:$("#cname").value.trim(),birthday:$("#cbirthday").value||null,phone:$("#cphone").value.trim(),email:$("#cemail").value.trim()}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Client updated.')}
+
+function openClass(id){const c=db.classes.find(x=>String(x.id)===String(id));if(!c)return;const bs=activeBookings(id),checked=bs.filter(b=>b.status==='checked_in').length,noShows=bs.filter(b=>b.status==='no_show').length,wait=bs.filter(b=>b.status==='waitlist').length,pending=bs.filter(b=>b.payment_status==='pending').length;const rows=bs.map(b=>{const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id));const cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null;const clientName=cl?.name||roster?.client_name||'Client';return `<div class="booking-person"><span><b>${esc(clientName)}</b><small>${esc(b.status)} · ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}</small></span>${isStaff()?`<span>${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}<button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button></span>`:''}</div>`}).join('');modal(`${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,`<p><span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}</p><div class="grid three"><div class="card kpi"><div class="label">Booked</div><div class="value">${bs.length}</div></div><div class="card kpi"><div class="label">Checked in</div><div class="value">${checked}</div></div><div class="card kpi"><div class="label">Waitlist</div><div class="value">${wait}</div></div></div><p class="muted">No-shows: ${noShows} · Payment pending: ${pending} · Capacity: ${c.capacity||0}</p>${rows||'<div class="empty">No bookings yet.</div>'}${isOwner()?`<div class="toolbar"><button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button><button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button><button class="btn" onclick="substituteClassModal('${c.id}')">Substitute</button></div>`:''}`)}
+function substituteClassModal(classId){const c=db.classes.find(x=>String(x.id)===String(classId));const instructors=db.team.filter(t=>t.role==='Instructor'&&t.auth_user_id);modal('Assign substitute',`<p>${esc(c?.class_type||'Class')} · ${esc(c?.class_date||'')}</p><label>Substitute instructor</label><select id="subInstructor"><option value="">Remove substitute</option>${instructors.map(t=>`<option value="${t.auth_user_id}">${esc(t.name)}</option>`).join('')}</select><button class="btn primary full" onclick="saveSubstitute('${classId}')">Save substitute</button>`)}
+async function saveSubstitute(classId){const uid=$("#subInstructor").value||null;const {error}=await sb.rpc('set_class_substitute',{p_class_id:classId,p_substitute_user_id:uid});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert(uid?'Substitute assigned.':'Substitute removed.')}
+
+function printReceipt(id){const s=db.sales.find(x=>String(x.id)===String(id));if(!s)return;const c=db.clients.find(x=>String(x.id)===String(s.client_id));const w=window.open('','_blank','width=520,height=700');if(!w)return alert('Allow pop-ups to print the receipt.');w.document.write(`<html><head><title>Core Theory Receipt</title><style>body{font-family:Arial;padding:32px;color:#222}h1{letter-spacing:2px}.row{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:9px 0}.muted{color:#666}</style></head><body><h1>CORE THEORY</h1><p class="muted">Payment receipt</p><div class="row"><span>Client</span><b>${esc(c?.name||'Walk-in')}</b></div><div class="row"><span>Paid for</span><b>${esc(saleWhat(s))}</b></div><div class="row"><span>Amount</span><b>${money(s.total)}</b></div><div class="row"><span>Method</span><b>${esc(s.payment_method||'')}</b></div><div class="row"><span>Date</span><b>${new Date(s.created_at).toLocaleString()}</b></div><div class="row"><span>Transaction</span><b>${esc(String(s.id).slice(0,8).toUpperCase())}</b></div><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
+
+function finance(){const active=salesActive(),rev=active.reduce((a,s)=>a+Number(s.total||0),0),exp=db.expenses.reduce((a,e)=>a+Number(e.amount||0),0),pending=db.package_orders.filter(o=>o.status==='pending');layout(`<div class="grid three"><div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div><div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div><div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div></div><div class="spacer"></div><div class="card"><h3>Pending package orders</h3>${pending.length?pending.map(o=>{const c=db.clients.find(x=>String(x.id)===String(o.client_id)),m=db.memberships.find(x=>String(x.id)===String(o.membership_id));return `<div class="booking-person"><span><b>${esc(c?.name||'Client')}</b><small>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)}`:''} · Payment Pending</small></span><span><button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change Package</button> <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button> <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button></span></div>`}).join(''):'<div class="empty">No pending package orders.</div>'}</div><div class="spacer"></div><div class="card"><h3>End-of-day reconciliation</h3><div class="toolbar"><input id="reconDate" type="date" value="${today()}" onchange="renderReconciliation()"><button class="btn" onclick="renderReconciliation()">Refresh</button></div><div id="reconBox"></div></div><div class="spacer"></div><div class="card"><div class="toolbar"><h3 style="margin:0">Payment history</h3><input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px"></div><div id="paymentHistoryRows"></div></div>`,`Finance`,`Owner-only payments, corrections and reconciliation`);renderReconciliation();renderPaymentHistory('')}
+function renderReconciliation(){const box=$("#reconBox");if(!box)return;const d=$("#reconDate")?.value||today(),rows=salesActive().filter(s=>String(s.created_at||'').slice(0,10)===d),methods=['Cash','Card','Whish','Transfer'];box.innerHTML=`<div class="grid three">${methods.map(m=>`<div class="card kpi"><div class="label">${m}</div><div class="value">${money(rows.filter(s=>s.payment_method===m).reduce((a,s)=>a+Number(s.total||0),0))}</div></div>`).join('')}</div><h3 style="margin-top:16px">By collector</h3>${Object.entries(rows.reduce((o,s)=>{const k=saleCollector(s);o[k]=(o[k]||0)+Number(s.total||0);return o},{})).map(([k,v])=>`<div class="cart-row"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')||'<div class="empty">No payments on this date.</div>'}`}
+
+function renderPaymentHistory(query=''){const box=$("#paymentHistoryRows");if(!box)return;const q=String(query||'').trim().toLowerCase(),rows=[...db.sales].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).filter(s=>{const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total,saleCollector(s)].join(' ').toLowerCase();return !q||hay.includes(q)});box.innerHTML=rows.length?`<div style="overflow:auto"><table><thead><tr><th>Date / time</th><th>Client</th><th>Paid for</th><th>Method</th><th>Amount</th><th>Recorded by</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr><td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}${s.edited_at?'<div class="muted">Edited</div>':''}</td><td><b>${esc(saleClientName(s))}</b></td><td>${esc(saleWhat(s))}</td><td>${esc(s.payment_method||'—')}</td><td><b>${money(s.total)}</b>${s.voided_at?'<div class="muted">Voided</div>':''}</td><td>${esc(saleCollector(s))}</td><td><button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button> ${s.voided_at?'<span class="badge">Voided</span>':`<button class="btn small" onclick="editSaleModal('${s.id}')">Edit</button> <button class="btn small danger" onclick="voidSale('${s.id}')">Void</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No matching payments.</div>'}
+
+function promoModal(id=''){const p=id?db.promo_codes.find(x=>String(x.id)===String(id)):null;modal(p?'Edit promo code':'New promo code',`<div class="form"><div><label>Code</label><input id="promoCode" value="${esc(p?.code||'')}"></div><div><label>Discount type</label><select id="promoType"><option value="percent" ${p?.discount_type!=='fixed'?'selected':''}>Percentage</option><option value="fixed" ${p?.discount_type==='fixed'?'selected':''}>Fixed amount</option></select></div><div><label>Discount value</label><input id="promoValue" type="number" min="0" step=".01" value="${p?.discount_value??p?.discount_percent??''}"></div><div><label>Valid for</label><select id="promoScope"><option ${(!p||p.studio_scope==='Both'||!p.studio_scope)?'selected':''}>Both</option><option ${p?.studio_scope==='Pilates'?'selected':''}>Pilates</option><option ${p?.studio_scope==='Megacore'?'selected':''}>Megacore</option></select></div><div><label>Starts</label><input id="promoStart" type="date" value="${p?.starts_at||''}"></div><div><label>Ends</label><input id="promoEnd" type="date" value="${p?.ends_at||''}"></div><div><label>Maximum total uses</label><input id="promoMax" type="number" min="1" value="${p?.max_uses??''}" placeholder="No limit"></div><div><label><input id="promoOneUse" type="checkbox" ${p?.one_use_per_client!==false?'checked':''}> One use per client</label><small class="muted">Turn this off if the same client may use the coupon more than once.</small></div><div class="full"><label>Specific membership (optional)</label><select id="promoMembership"><option value="">All memberships in scope</option>${sortedMemberships().map(m=>`<option value="${m.id}" ${String(p?.membership_id||'')===String(m.id)?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div><div class="full"><label>Status</label><select id="promoActive"><option value="true" ${p?.active!==false?'selected':''}>Active</option><option value="false" ${p?.active===false?'selected':''}>Inactive</option></select></div><div class="full"><button class="btn primary" onclick="${p?`savePromo('${p.id}')`:'addPromo()'}">${p?'Save changes':'Save'}</button></div></div>`)}
+function promoPayload(){return {code:$('#promoCode').value.trim().toUpperCase(),discount_type:$('#promoType').value,discount_value:+$('#promoValue').value,discount_percent:$('#promoType').value==='percent'?+$('#promoValue').value:0,studio_scope:$('#promoScope').value,starts_at:$('#promoStart').value||null,ends_at:$('#promoEnd').value||null,max_uses:$('#promoMax').value?+$('#promoMax').value:null,one_use_per_client:$('#promoOneUse').checked,membership_id:$('#promoMembership').value||null,active:$('#promoActive').value==='true'}}
+async function addPromo(){const {error}=await sb.from('promo_codes').insert(promoPayload());if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function savePromo(id){const {error}=await sb.from('promo_codes').update(promoPayload()).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Promo code updated.')}
+
+function eventModal(id=''){const e=id?db.studio_events.find(x=>String(x.id)===String(id)):null;modal(e?'Edit event':'New event',`<div class="form"><div><label>Event name</label><input id="eventTitle" value="${esc(e?.title||'')}" placeholder="Bring a Friend"></div><div><label>Type</label><select id="eventType"><option value="guest_pass" ${e?.event_type==='guest_pass'?'selected':''}>Free guest pass</option><option value="free_session" ${e?.event_type==='free_session'?'selected':''}>Free session</option><option value="announcement" ${e?.event_type==='announcement'?'selected':''}>Announcement only</option></select></div><div><label>Starts</label><input id="eventStart" type="date" value="${e?.start_date||today()}"></div><div><label>Ends</label><input id="eventEnd" type="date" value="${e?.end_date||today()}"></div><div><label>Studio</label><select id="eventScope"><option ${(!e||e.studio_scope==='Both')?'selected':''}>Both</option><option ${e?.studio_scope==='Pilates'?'selected':''}>Pilates</option><option ${e?.studio_scope==='Megacore'?'selected':''}>Megacore</option></select></div><div><label>Audience</label><select id="eventAudience"><option ${(!e||e.audience==='Clients')?'selected':''}>Clients</option><option ${e?.audience==='Everyone'?'selected':''}>Everyone</option></select></div><div><label>Maximum claims per client</label><input id="eventMax" type="number" min="1" value="${e?.max_claims_per_client??1}"></div><div><label>Status</label><select id="eventActive"><option value="true" ${e?.active!==false?'selected':''}>Active</option><option value="false" ${e?.active===false?'selected':''}>Inactive</option></select></div><div class="full"><label>Description</label><textarea id="eventDescription" placeholder="Bring one friend for free to any eligible class.">${esc(e?.description||'')}</textarea></div><div class="full"><button class="btn primary" onclick="${e?`saveEvent('${e.id}')`:'addEvent()'}">${e?'Save changes':'Create event'}</button></div></div>`)}
+function eventPayload(){return {title:$('#eventTitle').value.trim(),description:$('#eventDescription').value.trim(),event_type:$('#eventType').value,start_date:$('#eventStart').value,end_date:$('#eventEnd').value,studio_scope:$('#eventScope').value,audience:$('#eventAudience').value,max_claims_per_client:+$('#eventMax').value||1,active:$('#eventActive').value==='true'}}
+async function addEvent(){const p=eventPayload();if(!p.title)return alert('Enter an event name.');const {error}=await sb.from('studio_events').insert({...p,created_by:session.user.id});if(error)return alert(error.message);$('#modal').remove();await loadAll()}
+async function saveEvent(id){const {error}=await sb.from('studio_events').update(eventPayload()).eq('id',id);if(error)return alert(error.message);$('#modal').remove();await loadAll();alert('Event updated.')}
+async function toggleEvent(id,active){const {error}=await sb.from('studio_events').update({active}).eq('id',id);if(error)return alert(error.message);await loadAll()}
+
+function operations(){const ss=db.studio_settings[0]||{},low=db.clients.filter(c=>Number(c.sessions||0)<=1),expiring=db.clients.filter(c=>c.expiry&&c.expiry>=today()&&c.expiry<=dateISO(new Date(Date.now()+7*86400000))),unassigned=db.classes.filter(c=>c.class_date>=today()&&!c.cancelled&&!c.instructor_user_id),occ=occupancyStats(),methodTotals=['Cash','Card','Whish','Transfer'].map(m=>[m,salesActive().filter(s=>s.payment_method===m).reduce((a,s)=>a+Number(s.total||0),0)]);layout(`<div class="grid two"><div class="card"><h3>Booking rules</h3><div class="form"><div><label>Free cancellation (hours before)</label><input id="cancelHours" type="number" value="${ss.cancellation_hours??12}"></div><div><label>Booking closes (hours before)</label><input id="closeHours" type="number" value="${ss.booking_close_hours??1}"></div><div><label>Book up to (days ahead)</label><input id="aheadDays" type="number" value="${ss.booking_ahead_days??30}"></div><div><label>Late cancel deducts session</label><select id="lateDeduct"><option value="true" ${ss.late_cancel_deduct!==false?'selected':''}>Yes</option><option value="false" ${ss.late_cancel_deduct===false?'selected':''}>No</option></select></div><div><label>No-show deducts session</label><select id="noShowDeduct"><option value="true" ${ss.no_show_deduct!==false?'selected':''}>Yes</option><option value="false" ${ss.no_show_deduct===false?'selected':''}>No</option></select></div><div class="full"><button class="btn primary" onclick="saveStudioRules()">Save rules</button></div></div></div><div class="card"><h3>Studio alerts</h3><div class="cart-row"><span>Pending payments</span><b>${db.package_orders.filter(o=>o.status==='pending').length}</b></div><div class="cart-row"><span>Clients with ≤1 session</span><b>${low.length}</b></div><div class="cart-row"><span>Packages expiring in 7 days</span><b>${expiring.length}</b></div><div class="cart-row"><span>Low-stock products</span><b>${db.products.filter(p=>Number(p.stock||0)<=Number(p.minimum_stock||0)).length}</b></div><div class="cart-row"><span>Classes without instructor</span><b>${unassigned.length}</b></div><div class="cart-row"><span>Waitlisted bookings</span><b>${db.bookings.filter(b=>b.status==='waitlist').length}</b></div></div><div class="card"><h3>Reports</h3><div class="cart-row"><span>Overall occupancy</span><b>${occ.pct}%</b></div><div class="cart-row"><span>Pilates revenue</span><b>${money(revenueForScope('Pilates'))}</b></div><div class="cart-row"><span>Megacore revenue</span><b>${money(revenueForScope('Megacore'))}</b></div>${methodTotals.map(([m,v])=>`<div class="cart-row"><span>${m} revenue</span><b>${money(v)}</b></div>`).join('')}<button class="btn" onclick="exportData()">Export backup JSON</button> <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button></div><div class="card"><h3>Events & Specials</h3><div class="toolbar"><button class="btn primary" onclick="eventModal()">+ Event</button></div>${db.studio_events.map(e=>`<div class="cart-row"><span><b>${esc(e.title)}</b><small>${esc(e.event_type)} · ${esc(e.start_date)} → ${esc(e.end_date)} · ${esc(e.studio_scope)} · ${e.active?'Active':'Inactive'}</small><small>${esc(e.description||'')}</small></span><span><button class="btn small" onclick="eventModal('${e.id}')">Edit</button> <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">${e.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="removeItem('studio_events','${e.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No events yet.</div>'}</div><div class="card"><h3>Announcements</h3><div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>${db.announcements.map(a=>`<div class="cart-row"><span><b>${esc(a.title)}</b><small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small></span><span><button class="btn small" onclick="announcementModal('${a.id}')">Edit</button> <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button> <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No announcements.</div>'}</div><div class="card"><h3>Promo codes</h3><div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>${db.promo_codes.map(p=>`<div class="cart-row"><span><b>${esc(p.code)}</b><small>${p.discount_type==='fixed'?money(p.discount_value):`${p.discount_value??p.discount_percent}% off`} · ${esc(p.studio_scope||'Both')} · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'} · ${p.active?'Active':'Inactive'}</small></span><span><button class="btn small" onclick="promoModal('${p.id}')">Edit</button> <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="removeItem('promo_codes','${p.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No promo codes.</div>'}</div><div class="card"><h3>Audit log</h3>${db.audit_log.slice(-20).reverse().map(a=>`<div class="cart-row"><span><b>${esc(a.action)}</b><small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small></span></div>`).join('')||'<div class="empty">Activity will appear here.</div>'}</div></div>`,`Operations`,`Alerts, reports, coupons, events and announcements`)}
+
+
+function clienthome(){const c=myClient(),packages=db.client_packages.filter(p=>String(p.client_id)===String(c?.id)),active=packages.find(p=>p.status==='active'),upcomingPkg=packages.find(p=>p.status==='upcoming'),rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c?.id)&&r.status==='active'&&r.sessions_remaining>0&&r.valid_until>=today()),birthday=rewards.find(r=>r.reward_type==='birthday'),events=db.studio_events.filter(e=>e.active&&e.start_date<=today()&&e.end_date>=today()&&(e.audience==='Clients'||e.audience==='Everyone')),mine=db.bookings.filter(b=>String(b.client_id)===String(c?.id)&&!['cancelled','no_show'].includes(b.status)),upcoming=mine.map(b=>({b,cl:db.classes.find(x=>String(x.id)===String(b.class_id))})).filter(x=>x.cl&&!x.cl.cancelled&&new Date(`${x.cl.class_date}T${String(x.cl.class_time||'00:00').slice(0,8)}`)>=new Date()).sort((a,b)=>(a.cl.class_date+a.cl.class_time).localeCompare(b.cl.class_date+b.cl.class_time)),next=upcoming[0],pending=db.package_orders.find(o=>String(o.client_id)===String(c?.id)&&o.status==='pending'),warn=packageWarning(c),history=(db.client_payments||[]).slice(0,5);layout(`<div class="grid three"><div class="card kpi"><div class="label">Current package</div><div class="value" style="font-size:20px">${esc(active?.package_name||c?.package||'None')}</div></div><div class="card kpi"><div class="label">Sessions left</div><div class="value">${active?.sessions_remaining??c?.sessions??0}</div></div><div class="card kpi"><div class="label">Expiry</div><div class="value" style="font-size:20px">${esc(active?.expiry||c?.expiry||'—')}</div></div></div>${birthday?`<div class="notice card" style="margin-top:12px"><b>🎂 Happy Birthday from Core Theory!</b><p>You have 1 free session of your choice, valid until ${esc(birthday.valid_until)}.</p></div>`:''}${events.map(e=>`<div class="notice card" style="margin-top:12px"><b>${esc(e.title)}</b><p>${esc(e.description||'')} · Valid ${esc(e.start_date)} to ${esc(e.end_date)}</p></div>`).join('')}${upcomingPkg?`<div class="notice card" style="margin-top:12px"><b>Upcoming package</b><p>${esc(upcomingPkg.package_name)} · ${upcomingPkg.sessions_total===999?'Unlimited':upcomingPkg.sessions_total+' sessions'} · activates after your current package finishes.</p></div>`:''}${warn?`<div class="warning" style="margin-top:12px">${esc(warn)}</div>`:''}${pending?`<div class="notice card" style="margin-top:12px"><b>Payment pending</b><p>Your selected package is waiting for payment at Core Theory.</p></div>`:''}<div class="spacer"></div><div class="card"><h3>Next class</h3>${next?`<div class="booking-person"><span><b>${esc(next.cl.class_type||'Class')}</b><small>${esc(next.cl.class_date)} · ${formatTime((next.cl.class_time||'00:00').slice(0,5))} · ${esc(next.cl.studio_type||'Pilates')}</small></span><button class="btn" onclick="page='mybookings';render()">My bookings</button></div>`:'<div class="empty">No upcoming booking.</div>'}<button class="btn primary" onclick="page='book';render()">Book a Class</button></div><div class="spacer"></div><div class="card"><h3>Recent payments</h3>${history.map(p=>`<div class="cart-row"><span><b>${esc(p.description||'Payment')}</b><small>${new Date(p.created_at).toLocaleDateString()} · ${esc(p.payment_method||'')}${p.coupon_code?` · Coupon ${esc(p.coupon_code)}`:''}</small></span><b>${money(p.total)}</b></div>`).join('')||'<div class="empty">No payment history yet.</div>'}</div>`,`Home`,`Your Core Theory account`)}
+
+
+
+
+
+
+
+// ================= CORE THEORY V9 DAILY OPERATIONS =================
+
+function ym(d){return String(d||'').slice(0,7)}
+function currentYM(){return ym(today())}
+function prevYM(){const d=new Date();d.setMonth(d.getMonth()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`}
+function monthLabel(v){if(!v)return '';const [y,m]=v.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'})}
+function instructorForClass(c){const sub=(db.class_substitutions||[]).find(s=>String(s.class_id)===String(c.id)&&s.active);return sub?.substitute_instructor||c.instructor_user_id||null}
+function classCheckedInCount(c){return db.bookings.filter(b=>String(b.class_id)===String(c.id)&&b.status==='checked_in').length+(db.guest_bookings||[]).filter(g=>String(g.class_id)===String(c.id)&&g.status==='checked_in').length}
+function classWasTaught(c){return !c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date()&&classCheckedInCount(c)>0}
+function instructorStats(uid,month=currentYM()){
+  const own=db.classes.filter(c=>String(instructorForClass(c)||'')===String(uid||''));
+  const monthClasses=own.filter(c=>ym(c.class_date)===month&&!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date());
+  return {scheduled:monthClasses.length,taught:monthClasses.filter(classWasTaught).length,total:own.filter(classWasTaught).length};
+}
+function teachingMonths(uid,count=8){const out=[];for(let i=0;i<count;i++){const d=new Date();d.setMonth(d.getMonth()-i);const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,s=instructorStats(uid,key);out.push({key,label:monthLabel(key),...s})}return out}
+function classesTaughtCount(t){return instructorStats(t.auth_user_id).total}
+
+function instructorhome(){
+  const uid=session.user.id,now=new Date(),mine=[...db.classes].filter(c=>!c.cancelled),todayClasses=mine.filter(c=>c.class_date===today()).sort((a,b)=>String(a.class_time).localeCompare(String(b.class_time))),upcoming=mine.filter(c=>new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)>=now).sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time)),next=upcoming[0],cur=instructorStats(uid,currentYM()),last=instructorStats(uid,prevYM()),hist=teachingMonths(uid);
+  layout(`<div class="grid three"><div class="card kpi"><div class="label">Taught this month</div><div class="value">${cur.taught}</div><small>${cur.scheduled} scheduled</small></div><div class="card kpi"><div class="label">Taught last month</div><div class="value">${last.taught}</div><small>${last.scheduled} scheduled</small></div><div class="card kpi"><div class="label">Total taught</div><div class="value">${cur.total}</div><small>Requires ≥1 checked-in client</small></div></div><div class="spacer"></div><div class="grid two"><div class="card"><h3>Today</h3><div class="cart-row"><span>Classes today</span><b>${todayClasses.length}</b></div><div class="cart-row"><span>Front Desk Duty</span><b>${db.frontDeskDuty?'Active':'Off'}</b></div>${next?`<div class="cart-row"><span><b>Next class</b><small>${esc(next.class_type||'Class')} · ${formatTime((next.class_time||'00:00').slice(0,5))}</small></span><button class="btn" onclick="page='schedule';render()">Open</button></div>`:''}</div><div class="card"><h3>Monthly Teaching History</h3>${hist.map(h=>`<div class="cart-row"><span>${esc(h.label)}</span><span><b>${h.taught}</b><small>${h.scheduled} scheduled</small></span></div>`).join('')}</div></div><div class="spacer"></div><div class="card"><h3>Today's classes</h3>${todayClasses.map(classCard).join('')||'<div class="empty">No classes today.</div>'}</div>`,`Home`,`A class counts as taught only when at least one client or event guest checked in.`)
+}
+
+function team(){
+  const month=currentYM();
+  layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button><button class="btn" onclick="teamModal()">+ Add non-login team member</button><input type="month" id="teamMonth" value="${month}" onchange="team()"></div><div class="warning" style="margin-bottom:14px">Classes taught only count after the class time passes and at least one person actually checks in.</div><table><thead><tr><th>Name</th><th>Role</th><th>This month</th><th>Scheduled</th><th>Total taught</th><th>Class rate</th><th>Est. pay</th><th></th></tr></thead><tbody>${db.team.filter(t=>!t.archived_at).map(t=>{const s=t.auth_user_id?instructorStats(t.auth_user_id,month):{taught:0,scheduled:0,total:0},rate=Number(t.class_rate||0);return `<tr><td><b>${esc(t.name)}</b><div class="muted">${esc(t.email||'')}</div></td><td>${esc(t.role||'')}</td><td><b>${s.taught}</b></td><td>${s.scheduled}</td><td>${s.total}</td><td>${money(rate)}</td><td><b>${money(s.taught*rate)}</b></td><td><button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>${t.auth_user_id?` <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button> <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button> <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>`:` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`}</td></tr>`}).join('')}</tbody></table></div>`,`Team`,`Monthly teaching and payroll tracking`)}
+function payrollModal(teamId){const t=db.team.find(x=>String(x.id)===String(teamId));if(!t)return;const m=currentYM(),s=instructorStats(t.auth_user_id,m),adjs=db.payroll_adjustments.filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m),adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0),base=s.taught*Number(t.class_rate||0);modal(`${esc(t.name)} payroll`,`<label>Month</label><input id="payMonth" type="month" value="${m}" onchange="payrollMonthRefresh('${teamId}')"><div id="payrollBody"><div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div><div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div><div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div><div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div><div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div></div><h3>Add adjustment</h3><label>Amount (+ or -)</label><input id="payAdj" type="number" step=".01"><label>Reason</label><input id="payReason"><button class="btn primary full" onclick="addPayrollAdjustment('${teamId}')">Add adjustment</button>`)}
+async function payrollMonthRefresh(teamId){const m=$("#payMonth").value,t=db.team.find(x=>String(x.id)===String(teamId)),s=instructorStats(t.auth_user_id,m),adjs=db.payroll_adjustments.filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m),adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0),base=s.taught*Number(t.class_rate||0);$("#payrollBody").innerHTML=`<div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div><div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div><div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div><div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div><div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>`}
+async function addPayrollAdjustment(teamId){const amount=Number($("#payAdj").value),reason=$("#payReason").value.trim(),pay_month=$("#payMonth").value;if(!reason||!Number.isFinite(amount))return alert('Enter an amount and reason.');const {error}=await sb.from('payroll_adjustments').insert({team_id:teamId,pay_month,amount,reason,created_by:session.user.id});if(error)return alert(error.message);$("#modal").remove();await loadAll();payrollModal(teamId)}
+function editTeamMember(id){const t=db.team.find(x=>String(x.id)===String(id));if(!t)return;modal('Edit team member',`<div class="form"><div><label>Name</label><input id="tname" value="${esc(t.name||'')}"></div><div><label>Role</label><input id="trole" value="${esc(t.role||'')}"></div><div><label>Phone</label><input id="tphone" value="${esc(t.phone||'')}"></div><div><label>Rate / commission note</label><input id="trate" value="${esc(t.rate||'')}"></div><div><label>Class rate</label><input id="tclassrate" type="number" step=".01" value="${t.class_rate??0}"></div><div class="full"><button class="btn primary" onclick="saveTeamMember('${t.id}')">Save changes</button></div></div>`)}
+async function saveTeamMember(id){const {error}=await sb.from('team').update({name:$("#tname").value.trim(),role:$("#trole").value.trim(),phone:$("#tphone").value.trim(),rate:$("#trate").value.trim(),class_rate:+$("#tclassrate").value||0}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Team member updated.')}
+
+function clientStatus(c){if(db.package_orders.some(o=>String(o.client_id)===String(c.id)&&o.status==='pending'))return ['Payment pending','warning'];if(c.package_frozen_until&&c.package_frozen_until>=today())return ['Frozen','badge'];if(!c.package||Number(c.sessions||0)<=0)return ['No package','badge'];if(c.expiry&&c.expiry<=dateISO(new Date(Date.now()+7*86400000)))return ['Expiring soon','warning'];return ['Active','good']}
+function clients(){const q=($("#clientSearch")?.value||'').toLowerCase(),rows=db.clients.filter(c=>!c.archived_at&&(!q||[c.name,c.email,c.phone].join(' ').toLowerCase().includes(q)));layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="clientModal()">+ Add client</button><input id="clientSearch" placeholder="Search clients…" oninput="clients()" value="${esc(q)}"></div>${rows.length?`<table><thead><tr><th>Client</th><th>Status</th><th>Package</th><th>Sessions</th><th>Expiry</th><th></th></tr></thead><tbody>${rows.map(c=>{const st=clientStatus(c);return `<tr><td><b>${esc(c.name)}</b><div class="muted">${esc(c.email||'')} · ${esc(c.phone||'')}</div></td><td><span class="badge ${st[1]}">${st[0]}</span></td><td>${esc(c.package||'—')}</td><td>${c.sessions??0}</td><td>${esc(c.expiry||'—')}</td><td><button class="btn small" onclick="clientProfile('${c.id}')">Open</button> <button class="btn small" onclick="clientModal('${c.id}')">Edit</button> <button class="btn small" onclick="sellMembership('${c.id}')">Add package</button> <button class="btn small danger" onclick="deleteClient('${c.id}')">Delete</button></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">No matching clients.</div>'}</div>`,`Clients`,`Searchable profiles, packages, attendance, payments and notes`)}
+
+function clientProfile(id,tab='overview'){const c=db.clients.find(x=>String(x.id)===String(id));if(!c)return;const bookings=db.bookings.filter(b=>String(b.client_id)===String(id)),packages=db.client_packages.filter(p=>String(p.client_id)===String(id)).sort((a,b)=>String(b.purchased_at||'').localeCompare(String(a.purchased_at||''))),payments=db.sales.filter(s=>String(s.client_id)===String(id)).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))),notes=db.client_notes.filter(n=>String(n.client_id)===String(id)).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))),visits=bookings.filter(b=>b.status==='checked_in').length;const tabs=`<div class="schedule-tabs"><button class="tab ${tab==='overview'?'active':''}" onclick="clientProfile('${id}','overview')">Overview</button><button class="tab ${tab==='packages'?'active':''}" onclick="clientProfile('${id}','packages')">Packages</button><button class="tab ${tab==='attendance'?'active':''}" onclick="clientProfile('${id}','attendance')">Attendance</button><button class="tab ${tab==='payments'?'active':''}" onclick="clientProfile('${id}','payments')">Payments</button><button class="tab ${tab==='notes'?'active':''}" onclick="clientProfile('${id}','notes')">Notes</button></div>`;let body='';if(tab==='overview')body=`<div class="grid two"><div><p><b>Email:</b> ${esc(c.email||'—')}</p><p><b>Phone:</b> ${esc(c.phone||'—')}</p><p><b>Birthday:</b> ${esc(c.birthday||'—')}</p><p><b>Emergency:</b> ${esc(c.emergency_contact_name||'—')} ${esc(c.emergency_contact_phone||'')}</p><p><b>Waiver:</b> ${c.waiver_accepted_at?'Accepted '+new Date(c.waiver_accepted_at).toLocaleDateString():'Not recorded'}</p></div><div><p><b>Current package:</b> ${esc(c.package||'—')}</p><p><b>Sessions:</b> ${c.sessions??0}</p><p><b>Expiry:</b> ${esc(c.expiry||'—')}</p><p><b>Total visits:</b> ${visits}</p></div></div><div class="toolbar"><button class="btn" onclick="clientModal('${id}')">Edit client</button><button class="btn" onclick="sellMembership('${id}')">Add package</button><button class="btn" onclick="sessionAdjustmentModal('${id}')">Adjust sessions</button><button class="btn" onclick="freezeClientModal('${id}')">Freeze</button></div>`;if(tab==='packages')body=packages.map(p=>`<div class="cart-row"><span><b>${esc(p.package_name)}</b><small>${esc(p.status)} · ${p.sessions_remaining===999?'Unlimited':p.sessions_remaining+' / '+p.sessions_total+' left'} · ${esc(p.studio_scope||'Both')} · ${p.expiry||'No expiry'}</small></span><span>${p.price_paid!=null?money(p.price_paid):''}${p.status==='upcoming'&&p.sessions_remaining===p.sessions_total?` <button class="btn small" onclick="transferPackageModal('${p.id}')">Transfer</button>`:''}</span></div>`).join('')||'<div class="empty">No package history.</div>';if(tab==='attendance')body=bookings.map(b=>{const cl=db.classes.find(x=>String(x.id)===String(b.class_id));return `<div class="cart-row"><span><b>${esc(cl?.class_type||'Class')}</b><small>${esc(cl?.class_date||'')} · ${esc(cl?.studio_type||'')}</small></span><span class="badge">${esc(b.cancel_type||b.status)}</span></div>`}).join('')||'<div class="empty">No attendance history.</div>';if(tab==='payments')body=payments.map(s=>`<div class="cart-row"><span><b>${esc(saleWhat(s))}</b><small>${new Date(s.created_at).toLocaleString()} · ${esc(s.payment_method||'')}${s.voided_at?' · VOIDED':''}</small></span><span><b>${money(s.total)}</b> <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button></span></div>`).join('')||'<div class="empty">No payment history.</div>';if(tab==='notes')body=`<div class="toolbar"><button class="btn primary" onclick="clientNoteModal('${id}')">+ Add note</button></div>${notes.map(n=>`<div class="cart-row"><span><b>${esc(n.category)}</b>${n.teaching_visible?' <span class="badge">Instructor-visible</span>':''}<small>${esc(n.note)}</small><small>${new Date(n.created_at).toLocaleString()}</small></span><button class="btn small danger" onclick="removeItem('client_notes','${n.id}')">Delete</button></div>`).join('')||'<div class="empty">No notes.</div>'}`;modal(esc(c.name),tabs+`<div style="margin-top:14px">${body}</div>`)}
+function clientNoteModal(clientId){modal('Add client note',`<label>Category</label><select id="noteCategory"><option>General</option><option>Injury / limitation</option><option>Payment</option><option>Preference</option></select><label>Note</label><textarea id="noteText"></textarea><label><input id="noteTeaching" type="checkbox"> Instructor may see this note when client is in their class</label><button class="btn primary full" onclick="saveClientNote('${clientId}')">Save note</button>`)}
+async function saveClientNote(clientId){const note=$("#noteText").value.trim();if(!note)return alert('Enter a note.');const {error}=await sb.from('client_notes').insert({client_id:clientId,category:$("#noteCategory").value,note,teaching_visible:$("#noteTeaching").checked,created_by:session.user.id});if(error)return alert(error.message);$("#modal").remove();await loadAll();clientProfile(clientId,'notes')}
+function sessionAdjustmentModal(clientId){modal('Adjust sessions',`<label>Adjustment</label><input id="sessionAdj" type="number" step="1" placeholder="+1 or -1"><label>Reason</label><input id="sessionAdjReason" placeholder="Required"><button class="btn primary full" onclick="saveSessionAdjustment('${clientId}')">Apply adjustment</button>`)}
+async function saveSessionAdjustment(clientId){const amount=Number($("#sessionAdj").value),reason=$("#sessionAdjReason").value.trim();if(!Number.isInteger(amount)||amount===0||!reason)return alert('Enter a whole-number adjustment and a reason.');const {error}=await sb.rpc('owner_adjust_sessions',{p_client_id:clientId,p_adjustment:amount,p_reason:reason});if(error)return alert(error.message);$("#modal").remove();await loadAll();clientProfile(clientId)}
+function transferPackageModal(packageId){const p=db.client_packages.find(x=>String(x.id)===String(packageId));modal('Transfer unused upcoming package',`<p>${esc(p?.package_name||'Package')}</p><label>Transfer to client</label><select id="transferTo"><option value="">Choose client</option>${db.clients.filter(c=>String(c.id)!==String(p.client_id)).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><label>Reason</label><input id="transferReason"><button class="btn primary full" onclick="transferPackage('${packageId}')">Transfer</button>`)}
+async function transferPackage(packageId){const to=$("#transferTo").value,reason=$("#transferReason").value.trim();if(!to||!reason)return alert('Choose a client and enter a reason.');const {error}=await sb.rpc('owner_transfer_unused_package',{p_package_id:packageId,p_to_client_id:to,p_reason:reason});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Package transferred.')}
+
+function clientModal(id=''){const c=id?db.clients.find(x=>String(x.id)===String(id)):null;modal(c?'Edit client':'Add client',`<div class="form"><div><label>Name</label><input id="cname" value="${esc(c?.name||'')}"></div><div><label>Birthday</label><input id="cbirthday" type="date" value="${esc(c?.birthday||'')}"></div><div><label>Phone</label><input id="cphone" value="${esc(c?.phone||'')}"></div><div><label>Email</label><input id="cemail" type="email" value="${esc(c?.email||'')}"></div><div><label>Emergency contact name</label><input id="cemergencyname" value="${esc(c?.emergency_contact_name||'')}"></div><div><label>Emergency contact phone</label><input id="cemergencyphone" value="${esc(c?.emergency_contact_phone||'')}"></div><div class="full"><button class="btn primary" onclick="${c?`saveClient('${c.id}')`:'addClient()'}">${c?'Save changes':'Save'}</button></div></div>`)}
+async function addClient(){const {error}=await sb.from('clients').insert({name:$("#cname").value.trim(),birthday:$("#cbirthday").value||null,phone:$("#cphone").value.trim(),email:$("#cemail").value.trim(),emergency_contact_name:$("#cemergencyname").value.trim(),emergency_contact_phone:$("#cemergencyphone").value.trim(),sessions:0});if(error)return alert(error.message);$("#modal").remove();await loadAll()}
+async function saveClient(id){const {error}=await sb.from('clients').update({name:$("#cname").value.trim(),birthday:$("#cbirthday").value||null,phone:$("#cphone").value.trim(),email:$("#cemail").value.trim(),emergency_contact_name:$("#cemergencyname").value.trim(),emergency_contact_phone:$("#cemergencyphone").value.trim()}).eq('id',id);if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Client updated.')}
+
+function signupScreen(msg=""){$("#app").innerHTML=`<div class="auth-shell"><div class="auth-card"><div class="auth-brand">CORE THEORY<small>CLIENT ACCOUNT</small></div><h2>Create account</h2><form id="signupForm"><label>Full name</label><input id="suName" required><label>Birthday</label><input id="suBirthday" type="date" required><label>Email</label><input id="suEmail" type="email" required><label>Country / calling code</label><select id="suCountry" required>${countryOptions()}</select><label>Phone number</label><input id="suPhone" type="tel" placeholder="e.g. 70123456" required><small class="muted">Choose your country first. Core Theory saves the full international number.</small><label>Password</label><input id="suPass" type="password" minlength="8" required><label style="margin-top:12px"><input id="suWaiver" type="checkbox" required> I accept Core Theory's studio terms, cancellation/no-show policy and participation waiver.</label><button class="btn primary full" type="submit">Create account</button><div class="auth-error" id="authError">${esc(msg)}</div></form><button class="link-btn" onclick="authScreen()">← Back to sign in</button></div></div>`;$("#signupForm").onsubmit=signup}
+async function signup(e){e.preventDefault();const code=$("#suCountry").value.trim(),raw=$("#suPhone").value.trim().replace(/^0+/,'').replace(/\s+/g,''),birthday=$("#suBirthday").value;if(!birthday)return $("#authError").textContent="Birthday is required.";if(!$("#suWaiver").checked)return $("#authError").textContent="Please accept the studio terms and waiver.";if(!code)return $("#authError").textContent="Please choose a country with a calling code.";if(!raw)return $("#authError").textContent="Phone number is required.";const phone=code+raw;const {error}=await sb.auth.signUp({email:$("#suEmail").value.trim(),password:$("#suPass").value,options:{emailRedirectTo:location.origin,data:{full_name:$("#suName").value.trim(),birthday,phone,phone_country_code:code,waiver_accepted:true,waiver_version:'2026-09'}}});if(error)return $("#authError").textContent=error.message;authScreen("Account created. Check your email to confirm, then sign in.")}
+
+function teachingNotesForClass(classId){const clientIds=activeBookings(classId).map(b=>String(b.client_id));return db.client_notes.filter(n=>n.teaching_visible&&clientIds.includes(String(n.client_id)))}
+function openClass(id){const c=db.classes.find(x=>String(x.id)===String(id));if(!c)return;const bs=activeBookings(id),guests=isOwner()?(db.guest_bookings||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled'):(db.guestRoster||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled'),checked=bs.filter(b=>b.status==='checked_in').length+guests.filter(g=>g.status==='checked_in').length,noShows=bs.filter(b=>b.status==='no_show').length+guests.filter(g=>g.status==='no_show').length,wait=bs.filter(b=>b.status==='waitlist').length,pending=bs.filter(b=>b.payment_status==='pending').length,notes=teachingNotesForClass(id);const rows=bs.map(b=>{const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id)),cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null,clientName=cl?.name||roster?.client_name||'Client',n=notes.filter(x=>String(x.client_id)===String(b.client_id));return `<div class="booking-person"><span><b>${esc(clientName)}</b><small>${esc(b.status)} · ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}</small>${n.map(x=>`<small>⚑ ${esc(x.category)}: ${esc(x.note)}</small>`).join('')}</span>${isStaff()?`<span>${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}<button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button></span>`:''}</div>`}).join('');const guestRows=guests.map(g=>`<div class="booking-person"><span><b>${esc(g.guest_name||'Guest')}</b><small>Guest · ${esc(g.status)}${g.host_name?' · invited by '+esc(g.host_name):''}</small></span>${isStaff()&&g.status==='booked'?`<button class="btn small" onclick="checkInGuest('${g.booking_id||g.id}')">Check in guest</button>`:''}</div>`).join('');modal(`${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,`<p><span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}</p><div class="grid three"><div class="card kpi"><div class="label">Booked</div><div class="value">${bs.length+guests.length}</div></div><div class="card kpi"><div class="label">Checked in</div><div class="value">${checked}</div></div><div class="card kpi"><div class="label">Waitlist</div><div class="value">${wait}</div></div></div><p class="muted">No-shows: ${noShows} · Payment pending: ${pending} · Capacity: ${c.capacity||0}</p>${rows}${guestRows||''}${!rows&&!guestRows?'<div class="empty">No bookings yet.</div>':''}${isOwner()?`<div class="toolbar"><button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button><button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button><button class="btn" onclick="substituteClassModal('${c.id}')">Substitute</button></div>`:''}`)}
+async function checkInGuest(id){const {error}=await sb.rpc('check_in_guest_booking',{p_guest_booking_id:id});if(error)return alert(error.message);$("#modal")?.remove();await loadAll();alert('Guest checked in.')}
+
+function clienthome(){const c=myClient(),packages=db.client_packages.filter(p=>String(p.client_id)===String(c?.id)),active=packages.find(p=>p.status==='active'),upcomingPkg=packages.find(p=>p.status==='upcoming'),rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c?.id)&&r.status==='active'&&r.sessions_remaining>0&&r.valid_until>=today()),birthday=rewards.find(r=>r.reward_type==='birthday'),events=db.studio_events.filter(e=>!e.archived_at&&e.active&&e.start_date<=today()&&e.end_date>=today()&&(e.audience==='Clients'||e.audience==='Everyone')),notifs=(db.client_notifications||[]).filter(n=>String(n.client_id)===String(c?.id)&&!n.dismissed_at),mine=db.bookings.filter(b=>String(b.client_id)===String(c?.id)&&!['cancelled','no_show'].includes(b.status)),upcoming=mine.map(b=>({b,cl:db.classes.find(x=>String(x.id)===String(b.class_id))})).filter(x=>x.cl&&!x.cl.cancelled&&new Date(`${x.cl.class_date}T${String(x.cl.class_time||'00:00').slice(0,8)}`)>=new Date()).sort((a,b)=>(a.cl.class_date+a.cl.class_time).localeCompare(b.cl.class_date+b.cl.class_time)),next=upcoming[0],pending=db.package_orders.find(o=>String(o.client_id)===String(c?.id)&&o.status==='pending'),warn=packageWarning(c),history=(db.client_payments||[]).slice(0,5);layout(`${notifs.map(n=>`<div class="notice card" style="margin-bottom:12px"><b>${esc(n.title)}</b><p>${esc(n.message)}</p></div>`).join('')}<div class="grid three"><div class="card kpi"><div class="label">Current package</div><div class="value" style="font-size:20px">${esc(active?.package_name||c?.package||'None')}</div></div><div class="card kpi"><div class="label">Sessions left</div><div class="value">${active?.sessions_remaining??c?.sessions??0}</div></div><div class="card kpi"><div class="label">Expiry</div><div class="value" style="font-size:20px">${esc(active?.expiry||c?.expiry||'—')}</div></div></div>${birthday?`<div class="notice card" style="margin-top:12px"><b>🎂 Happy Birthday from Core Theory!</b><p>You have 1 free session of your choice, valid until ${esc(birthday.valid_until)}.</p></div>`:''}${events.map(e=>`<div class="notice card" style="margin-top:12px"><b>${esc(e.title)}</b><p>${esc(e.description||'')} · Valid ${esc(e.start_date)} to ${esc(e.end_date)}</p>${e.event_type==='guest_pass'?`<button class="btn primary" onclick="window.v1013StartGuestEvent('${e.id}')">Bring a guest</button>`:''}</div>`).join('')}${upcomingPkg?`<div class="notice card" style="margin-top:12px"><b>Upcoming package</b><p>${esc(upcomingPkg.package_name)} · ${upcomingPkg.sessions_total===999?'Unlimited':upcomingPkg.sessions_total+' sessions'} · activates after your current package finishes.</p></div>`:''}${warn?`<div class="warning" style="margin-top:12px">${esc(warn)}</div>`:''}${pending?`<div class="notice card" style="margin-top:12px"><b>Payment pending</b><p>Your selected package is waiting for payment at Core Theory.</p></div>`:''}<div class="spacer"></div><div class="card"><h3>Next class</h3>${next?`<div class="booking-person"><span><b>${esc(next.cl.class_type||'Class')}</b><small>${esc(next.cl.class_date)} · ${formatTime((next.cl.class_time||'00:00').slice(0,5))} · ${esc(next.cl.studio_type||'Pilates')}</small></span><button class="btn" onclick="page='mybookings';render()">My bookings</button></div>`:'<div class="empty">No upcoming booking.</div>'}<button class="btn primary" onclick="page='book';render()">Book a Class</button></div><div class="spacer"></div><div class="card"><h3>Recent payments</h3>${history.map(p=>`<div class="cart-row"><span><b>${esc(p.description||'Payment')}</b><small>${new Date(p.created_at).toLocaleDateString()} · ${esc(p.payment_method||'')}${p.coupon_code?` · Coupon ${esc(p.coupon_code)}`:''}</small></span><b>${money(p.total)}</b></div>`).join('')||'<div class="empty">No payment history yet.</div>'}</div>`,`Home`,`Your Core Theory account`)}
+
+function guestEventModal(eventId){const e=db.studio_events.find(x=>String(x.id)===String(eventId));if(!e)return;const eligible=db.classes.filter(c=>!c.cancelled&&c.class_date>=today()&&c.class_date>=e.start_date&&c.class_date<=e.end_date&&(e.studio_scope==='Both'||c.studio_type===e.studio_scope));modal(e.title,`<label>Guest name</label><input id="guestName"><label>Guest phone (optional)</label><input id="guestPhone"><label>Class</label><select id="guestClass">${eligible.map(c=>`<option value="${c.id}">${esc(c.class_date)} · ${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.class_type)}</option>`).join('')}</select><button class="btn primary full" onclick="window.v1013LegacyGuestClick('${eventId}')">Book guest</button>`)}
+async function bookEventGuest(eventId){const name=$("#guestName").value.trim(),classId=$("#guestClass").value;if(!name||!classId)return alert('Enter the guest name and choose a class.');const {error}=await sb.rpc('book_event_guest',{p_event_id:eventId,p_class_id:classId,p_guest_name:name,p_guest_phone:$("#guestPhone").value.trim()||null});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Guest booked. The guest counts toward class capacity.')}
+
+function eventPerformance(e){const rows=(db.guest_bookings||[]).filter(g=>String(g.event_id)===String(e.id));return {booked:rows.filter(x=>x.status!=='cancelled').length,checked:rows.filter(x=>x.status==='checked_in').length,converted:(db.guest_profiles||[]).filter(g=>String(g.source_event_id||'')===String(e.id)&&g.converted_client_id).length}}
+function operations(){const ss=db.studio_settings[0]||{},low=db.clients.filter(c=>Number(c.sessions||0)<=1),expiring=db.clients.filter(c=>c.expiry&&c.expiry>=today()&&c.expiry<=dateISO(new Date(Date.now()+7*86400000))),unassigned=db.classes.filter(c=>c.class_date>=today()&&!c.cancelled&&!c.instructor_user_id),occ=occupancyStats(),birthdays=db.clients.filter(c=>c.birthday&&String(c.birthday).slice(5,7)===String(new Date().getMonth()+1).padStart(2,'0')),birthdayUsed=db.client_rewards.filter(r=>r.reward_type==='birthday'&&r.status==='used'&&r.issued_year===new Date().getFullYear()).length;layout(`<div class="grid two"><div class="card"><h3>Studio alerts</h3><div class="cart-row"><span>Pending payments</span><b>${db.package_orders.filter(o=>o.status==='pending').length}</b></div><div class="cart-row"><span>Clients with ≤1 session</span><b>${low.length}</b></div><div class="cart-row"><span>Packages expiring in 7 days</span><b>${expiring.length}</b></div><div class="cart-row"><span>Low-stock products</span><b>${db.products.filter(p=>Number(p.stock||0)<=Number(p.minimum_stock||0)).length}</b></div><div class="cart-row"><span>Classes without instructor</span><b>${unassigned.length}</b></div><div class="cart-row"><span>Zero-attendance past classes</span><b>${db.classes.filter(c=>!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date()&&classCheckedInCount(c)===0).length}</b></div></div><div class="card"><h3>Birthdays</h3><div class="cart-row"><span>Birthdays this month</span><b>${birthdays.length}</b></div><div class="cart-row"><span>Birthday gifts used this year</span><b>${birthdayUsed}</b></div>${birthdays.slice(0,12).map(c=>`<div class="cart-row"><span>${esc(c.name)}</span><small>${esc(String(c.birthday).slice(5))}</small></div>`).join('')}</div><div class="card"><h3>Events & Specials</h3><div class="toolbar"><button class="btn primary" onclick="eventModal()">+ Event</button></div>${db.studio_events.filter(e=>!e.archived_at).map(e=>{const p=eventPerformance(e);return `<div class="cart-row"><span><b>${esc(e.title)}</b><small>${esc(e.start_date)} → ${esc(e.end_date)} · ${esc(e.studio_scope)} · ${e.active?'Active':'Inactive'}</small><small>Booked guests: ${p.booked} · Checked in: ${p.checked} · Converted: ${p.converted}</small></span><span><button class="btn small" onclick="eventModal('${e.id}')">Edit</button> <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">${e.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="archiveRecord('studio_events','${e.id}')">Archive</button></span></div>`}).join('')||'<div class="empty">No events yet.</div>'}</div><div class="card"><h3>Promo codes</h3><div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>${db.promo_codes.filter(p=>!p.archived_at).map(p=>{const uses=(db.promo_code_uses||[]).filter?.(u=>String(u.promo_id)===String(p.id))||[];return `<div class="cart-row"><span><b>${esc(p.code)}</b><small>${p.discount_type==='fixed'?money(p.discount_value):`${p.discount_value??p.discount_percent}% off`} · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'} · ${p.active?'Active':'Inactive'}</small></span><span><button class="btn small" onclick="promoModal('${p.id}')">Edit</button> <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="archiveRecord('promo_codes','${p.id}')">Archive</button></span></div>`}).join('')||'<div class="empty">No promo codes.</div>'}</div><div class="card"><h3>Reports & backup</h3><div class="cart-row"><span>Overall occupancy</span><b>${occ.pct}%</b></div><div class="toolbar"><input id="reportFrom" type="date" value="${monthStart()}"><input id="reportTo" type="date" value="${today()}"><button class="btn" onclick="exportDateRangeReport()">Export date-range CSV</button><button class="btn" onclick="exportData()">Full backup JSON</button></div></div><div class="card"><h3>Announcements</h3><div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>${db.announcements.map(a=>`<div class="cart-row"><span><b>${esc(a.title)}</b><small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small></span><span><button class="btn small" onclick="announcementModal('${a.id}')">Edit</button> <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button> <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No announcements.</div>'}</div><div class="card"><h3>Audit log</h3>${db.audit_log.slice(-30).reverse().map(a=>`<div class="cart-row"><span><b>${esc(a.action)}</b><small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small></span></div>`).join('')||'<div class="empty">Activity will appear here.</div>'}</div></div>`,`Operations`,`Alerts, events, birthdays, reports and audit trail`)}
+
+function exportDateRangeReport(){const from=$("#reportFrom").value,to=$("#reportTo").value,rows=[['Type','Date','Client/Category','Description','Method','Amount']];db.sales.filter(s=>!s.voided_at&&String(s.created_at).slice(0,10)>=from&&String(s.created_at).slice(0,10)<=to).forEach(s=>rows.push(['Sale',String(s.created_at).slice(0,10),saleClientName(s),saleWhat(s),s.payment_method,s.total]));db.expenses.filter(e=>e.expense_date>=from&&e.expense_date<=to).forEach(e=>rows.push(['Expense',e.expense_date,e.category,e.description||'',e.payment_method||'',-Number(e.amount||0)]));const csv=rows.map(r=>r.map(v=>`"${String(v??'').replaceAll('"','""')}"`).join(',')).join('\n'),blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`core-theory-report-${from}-to-${to}.csv`;a.click();URL.revokeObjectURL(a.href)}
+
+async function archiveRecord(table,id){if(!confirm('Archive this item? It will disappear from active use but its history will be kept.'))return;const {error}=await sb.from(table).update({archived_at:new Date().toISOString()}).eq('id',id);if(error)return alert(error.message);await loadAll()}
+function memberships(){const ms=sortedMemberships();layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="membershipModal()">+ Add membership</button></div>${ms.length?ms.map((m,i)=>`<div class="cart-row"><span><b>${esc(m.name)}</b>${m.is_private?' <span class="badge">Private Session</span>':''}<small>${m.is_private?'Private Session':(m.sessions===999?'Unlimited':m.sessions+' sessions')} · ${m.validity_days} days · ${esc(m.studio_scope||'Both')}</small></span><span class="row"><b>${money(m.price)}</b><button class="btn small" ${i===0?'disabled':''} onclick="moveMembership('${m.id}',-1)">↑</button><button class="btn small" ${i===ms.length-1?'disabled':''} onclick="moveMembership('${m.id}',1)">↓</button><button class="btn small" onclick="editMembership('${m.id}')">Edit</button><button class="btn small danger" onclick="archiveRecord('memberships','${m.id}')">Archive</button></span></div>`).join(''):'<div class="empty">No memberships yet.</div>'}</div>`,`Memberships`,`Archive used memberships instead of deleting historical records`)}
+
+
+
+// ================= CORE THEORY V9.1 CLICKABLE STUDIO ALERTS =================
+function studioAlertData(type){
+  const end7=dateISO(new Date(Date.now()+7*86400000));
+  if(type==='pending')return db.package_orders.filter(o=>o.status==='pending');
+  if(type==='low_sessions')return db.clients.filter(c=>!c.archived_at&&Number(c.sessions||0)<=1);
+  if(type==='expiring')return db.clients.filter(c=>!c.archived_at&&c.expiry&&c.expiry>=today()&&c.expiry<=end7);
+  if(type==='low_stock')return db.products.filter(p=>p.active!==false&&Number(p.stock||0)<=Number(p.minimum_stock||0));
+  if(type==='unassigned')return db.classes.filter(c=>c.class_date>=today()&&!c.cancelled&&!c.instructor_user_id);
+  if(type==='zero_attendance')return db.classes.filter(c=>!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date()&&classCheckedInCount(c)===0);
+  if(type==='waitlist')return db.bookings.filter(b=>b.status==='waitlist');
+  return [];
+}
+function alertRow(label,type){
+  const count=studioAlertData(type).length;
+  return `<button type="button" class="cart-row alert-click-row" onclick="showStudioAlert('${type}')"><span>${esc(label)}<small>Tap to view details</small></span><b>${count} ›</b></button>`;
+}
+function showStudioAlert(type){
+  const rows=studioAlertData(type);
+  let title='',html='';
+  if(type==='pending'){
+    title='Pending payments';
+    html=rows.map(o=>{const c=db.clients.find(x=>String(x.id)===String(o.client_id)),m=db.memberships.find(x=>String(x.id)===String(o.membership_id));return `<div class="booking-person"><span><b>${esc(c?.name||'Client')}</b><small>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)}`:''}</small></span><button class="btn small" onclick="$('#modal').remove();page='finance';render()">Finance</button></div>`}).join('');
+  }else if(type==='low_sessions'){
+    title='Clients with 1 session or less';
+    html=rows.map(c=>`<div class="booking-person"><span><b>${esc(c.name)}</b><small>${esc(c.package||'No package')} · ${c.sessions??0} session${Number(c.sessions)===1?'':'s'} left · Expiry ${esc(c.expiry||'—')}</small></span><button class="btn small" onclick="$('#modal').remove();clientProfile('${c.id}')">Open client</button></div>`).join('');
+  }else if(type==='expiring'){
+    title='Packages expiring within 7 days';
+    html=rows.sort((a,b)=>String(a.expiry).localeCompare(String(b.expiry))).map(c=>{const days=Math.max(0,Math.ceil((new Date(c.expiry+'T12:00:00')-new Date(today()+'T12:00:00'))/86400000));return `<div class="booking-person"><span><b>${esc(c.name)}</b><small>${esc(c.package||'Package')} · ${c.sessions??0} sessions left · Expires ${esc(c.expiry)} (${days} day${days===1?'':'s'})</small></span><button class="btn small" onclick="$('#modal').remove();clientProfile('${c.id}')">Open client</button></div>`}).join('');
+  }else if(type==='low_stock'){
+    title='Low-stock products';
+    html=rows.sort((a,b)=>Number(a.stock||0)-Number(b.stock||0)).map(p=>`<div class="booking-person"><span><b>${esc(p.name)}</b><small>Current stock: ${p.stock??0} · Minimum: ${p.minimum_stock??0} · ${esc(p.category||'')}</small></span><button class="btn small" onclick="$('#modal').remove();page='inventory';render()">Inventory</button></div>`).join('');
+  }else if(type==='unassigned'){
+    title='Classes without an instructor';
+    html=rows.sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time)).map(c=>`<div class="booking-person"><span><b>${esc(c.class_type||'Class')}</b><small>${esc(c.class_date)} · ${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.studio_type||'')}</small></span><button class="btn small" onclick="$('#modal').remove();editClassModal('${c.id}')">Assign</button></div>`).join('');
+  }else if(type==='zero_attendance'){
+    title='Past classes with zero attendance';
+    html=rows.sort((a,b)=>(b.class_date+b.class_time).localeCompare(a.class_date+a.class_time)).map(c=>`<div class="booking-person"><span><b>${esc(c.class_type||'Class')}</b><small>${esc(c.class_date)} · ${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'No instructor')} · 0 checked in</small></span><button class="btn small" onclick="$('#modal').remove();openClass('${c.id}')">Open class</button></div>`).join('');
+  }else if(type==='waitlist'){
+    title='Waitlisted bookings';
+    html=rows.map(b=>{const c=db.clients.find(x=>String(x.id)===String(b.client_id)),cl=db.classes.find(x=>String(x.id)===String(b.class_id));return `<div class="booking-person"><span><b>${esc(c?.name||'Client')}</b><small>${esc(cl?.class_type||'Class')} · ${esc(cl?.class_date||'')} · ${cl?.class_time?formatTime(String(cl.class_time).slice(0,5)):''}</small></span><button class="btn small" onclick="$('#modal').remove();openClass('${b.class_id}')">Open class</button></div>`}).join('');
+  }
+  modal(title,html||'<div class="empty">Nothing needs attention here.</div>');
+}
+
+function dashboard(){
+  const activeSales=salesActive(),rev=activeSales.reduce((a,s)=>a+Number(s.total||0),0),exp=db.expenses.reduce((a,e)=>a+Number(e.amount||0),0),todayRev=activeSales.filter(s=>String(s.created_at||'').slice(0,10)===today()).reduce((a,s)=>a+Number(s.total||0),0),monthRev=activeSales.filter(s=>String(s.created_at||'').slice(0,10)>=monthStart()).reduce((a,s)=>a+Number(s.total||0),0),monthExp=db.expenses.filter(e=>String(e.expense_date||'')>=monthStart()).reduce((a,e)=>a+Number(e.amount||0),0),occ=occupancyStats();
+  layout(`<div class="grid kpis"><div class="card kpi"><div class="label">Revenue today</div><div class="value">${money(todayRev)}</div></div><div class="card kpi"><div class="label">Revenue this month</div><div class="value">${money(monthRev)}</div></div><div class="card kpi"><div class="label">Month profit</div><div class="value">${money(monthRev-monthExp)}</div></div><div class="card kpi"><div class="label">Occupancy</div><div class="value">${occ.pct}%</div></div></div><div class="spacer"></div><div class="grid three"><div class="card"><h3>Studio alerts</h3>${alertRow('Pending payments','pending')}${alertRow('Clients with ≤1 session','low_sessions')}${alertRow('Packages expiring in 7 days','expiring')}${alertRow('Low-stock products','low_stock')}${alertRow('Classes without instructor','unassigned')}${alertRow('Zero-attendance past classes','zero_attendance')}${alertRow('Waitlisted bookings','waitlist')}</div><div class="card"><h3>Revenue mix</h3><div class="cart-row"><span>Pilates</span><b>${money(revenueForScope('Pilates'))}</b></div><div class="cart-row"><span>Megacore</span><b>${money(revenueForScope('Megacore'))}</b></div><div class="cart-row"><span>Both packages</span><b>${money(revenueForScope('Both'))}</b></div></div><div class="card"><h3>Totals</h3><div class="cart-row"><span>All revenue</span><b>${money(rev)}</b></div><div class="cart-row"><span>All expenses</span><b>${money(exp)}</b></div><div class="cart-row"><span>Estimated profit</span><b>${money(rev-exp)}</b></div></div></div><div class="spacer"></div><div class="card"><h3>Today's classes</h3>${db.classes.filter(c=>c.class_date===today()&&!c.cancelled).map(classCard).join('')||'<div class="empty">No classes today.</div>'}</div>`,`Dashboard`,`Studio performance, alerts and today's operations`)
+}
+
+function operations(){
+  const occ=occupancyStats(),birthdays=db.clients.filter(c=>c.birthday&&String(c.birthday).slice(5,7)===String(new Date().getMonth()+1).padStart(2,'0')),birthdayUsed=db.client_rewards.filter(r=>r.reward_type==='birthday'&&r.status==='used'&&r.issued_year===new Date().getFullYear()).length;
+  layout(`<div class="grid two"><div class="card"><h3>Studio alerts</h3>${alertRow('Pending payments','pending')}${alertRow('Clients with ≤1 session','low_sessions')}${alertRow('Packages expiring in 7 days','expiring')}${alertRow('Low-stock products','low_stock')}${alertRow('Classes without instructor','unassigned')}${alertRow('Zero-attendance past classes','zero_attendance')}${alertRow('Waitlisted bookings','waitlist')}</div><div class="card"><h3>Birthdays</h3><div class="cart-row"><span>Birthdays this month</span><b>${birthdays.length}</b></div><div class="cart-row"><span>Birthday gifts used this year</span><b>${birthdayUsed}</b></div>${birthdays.slice(0,12).map(c=>`<div class="cart-row"><span>${esc(c.name)}</span><small>${esc(String(c.birthday).slice(5))}</div>`).join('')}</div><div class="card"><h3>Events & Specials</h3><div class="toolbar"><button class="btn primary" onclick="eventModal()">+ Event</button></div>${db.studio_events.filter(e=>!e.archived_at).map(e=>{const p=eventPerformance(e);return `<div class="cart-row"><span><b>${esc(e.title)}</b><small>${esc(e.start_date)} → ${esc(e.end_date)} · ${esc(e.studio_scope)} · ${e.active?'Active':'Inactive'}</small><small>Booked guests: ${p.booked} · Checked in: ${p.checked} · Converted: ${p.converted}</small></span><span><button class="btn small" onclick="eventModal('${e.id}')">Edit</button> <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">${e.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="archiveRecord('studio_events','${e.id}')">Archive</button></span></div>`}).join('')||'<div class="empty">No events yet.</div>'}</div><div class="card"><h3>Promo codes</h3><div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>${db.promo_codes.filter(p=>!p.archived_at).map(p=>`<div class="cart-row"><span><b>${esc(p.code)}</b><small>${p.discount_type==='fixed'?money(p.discount_value):`${p.discount_value??p.discount_percent}% off`} · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'} · ${p.active?'Active':'Inactive'}</small></span><span><button class="btn small" onclick="promoModal('${p.id}')">Edit</button> <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button> <button class="btn small danger" onclick="archiveRecord('promo_codes','${p.id}')">Archive</button></span></div>`).join('')||'<div class="empty">No promo codes.</div>'}</div><div class="card"><h3>Reports & backup</h3><div class="cart-row"><span>Overall occupancy</span><b>${occ.pct}%</b></div><div class="toolbar"><input id="reportFrom" type="date" value="${monthStart()}"><input id="reportTo" type="date" value="${today()}"><button class="btn" onclick="exportDateRangeReport()">Export date-range CSV</button><button class="btn" onclick="exportData()">Full backup JSON</button></div></div><div class="card"><h3>Announcements</h3><div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>${db.announcements.map(a=>`<div class="cart-row"><span><b>${esc(a.title)}</b><small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small></span><span><button class="btn small" onclick="announcementModal('${a.id}')">Edit</button> <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button> <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button></span></div>`).join('')||'<div class="empty">No announcements.</div>'}</div><div class="card"><h3>Audit log</h3>${db.audit_log.slice(-30).reverse().map(a=>`<div class="cart-row"><span><b>${esc(a.action)}</b><small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small></span></div>`).join('')||'<div class="empty">Activity will appear here.</div>'}</div></div>`,`Operations`,`Tap any studio alert to see exactly what needs attention.`)
+}
+
+function applyClickableAlertStyle(){
+  if(document.getElementById('coreTheoryAlertStyle'))return;
+  const s=document.createElement('style');s.id='coreTheoryAlertStyle';
+  s.textContent=`
+    .alert-click-row{
+      width:100%;border:0;background:transparent;font:inherit;text-align:left;
+      cursor:pointer;color:#333 !important;-webkit-text-fill-color:#333 !important;
+      padding-left:0;padding-right:0;
+    }
+    .alert-click-row:hover{background:rgba(0,0,0,.035)}
+    .alert-click-row b{white-space:nowrap}
+  `;
+  document.head.appendChild(s);
+}
+
+
+function frontdesk(){
+  if(!isFrontDeskStaff()||!db.frontDeskDuty)return account();
+  const rows=(db.frontDeskToday||[]),byClass={};
+  rows.forEach(r=>{const k=r.class_id;if(!byClass[k])byClass[k]={name:r.class_name,time:r.class_time,instructor:r.instructor_name,rows:[]};byClass[k].rows.push(r)});
+  const payments=Object.values(byClass).map(g=>`<div class="card"><h3>${esc(g.name)} · ${g.time?formatTime(String(g.time).slice(0,5)):''}</h3><p class="muted">${esc(g.instructor||'')}</p>${g.rows.map(r=>`<div class="booking-person"><span><b>${esc(r.client_name)}</b><small>${esc(r.booking_status)} · ${r.payment_status==='pending'?'<b>Payment Pending</b>':'Paid'}${r.membership_name?' · '+esc(r.membership_name):''}${r.coupon_code?` · Coupon ${esc(r.coupon_code)} (${r.discount_percent||0}% off)`:''}</small></span><span>${r.payment_status==='pending'?(r.package_order_id?`<button class="btn small primary" onclick="frontDeskPayment('${r.package_order_id}')">Collect payment</button>`:`<button class="btn small primary" onclick="manualBookingPayment('${r.booking_id}',decodeURIComponent('${encodeURIComponent(r.client_name||'Client')}'))">Add package / collect</button>`):''}</span></div>`).join('')}</div>`).join('');
+  layout(`<div class="notice card"><b>Booking / Front Desk Duty is active today.</b><p>You can add clients to classes even when they have no sessions. If they do not have a valid session, the booking is marked Payment Pending and no session is deducted until payment/package is resolved.</p></div><div class="card"><h3>Add a WhatsApp / phone booking</h3><label>Class</label><select id="fdBookClass">${(db.frontDeskBookingClasses||[]).map(c=>`<option value="${c.class_id}">${esc(c.class_date)} · ${c.class_time?formatTime(String(c.class_time).slice(0,5)):''} · ${esc(c.class_name)} · ${esc(c.studio_type||'')}</option>`).join('')}</select><label>Client</label><input id="fdClientSearch" placeholder="Type client name…" oninput="frontDeskBookingClientSearch(this.value)"><div id="fdClientSearchResults"></div><div id="fdSelectedClient" class="muted">No client selected.</div><button class="btn primary" onclick="frontDeskManualBook()">Add client to class</button></div><div class="spacer"></div>${payments||'<div class="card empty">No bookings today.</div>'}`,'Front Desk','Bookings and payments without access to private client contact information');
+}
+let fdBookingClient=null;
+async function frontDeskBookingClientSearch(q){const box=$("#fdClientSearchResults");if(!box)return;const term=String(q||'').trim();fdBookingClient=null;if(term.length<2){box.innerHTML='';return}const {data,error}=await sb.rpc('front_desk_client_search',{p_query:term});if(error){box.innerHTML=`<div class="warning">${esc(error.message)}</div>`;return}box.innerHTML=(data||[]).map(c=>`<button type="button" class="btn small full" style="text-align:left;margin-top:6px" onclick="chooseFrontDeskBookingClient('${c.id}',decodeURIComponent('${encodeURIComponent(c.name||'')}'))">${esc(c.name)}</button>`).join('')||'<div class="muted">No matching client.</div>'}
+function chooseFrontDeskBookingClient(id,name){fdBookingClient={id:String(id),name:String(name)};$("#fdClientSearch").value=name;$("#fdClientSearchResults").innerHTML='';$("#fdSelectedClient").innerHTML=`Selected: <b>${esc(name)}</b>`}
+async function frontDeskManualBook(){const classId=$("#fdBookClass")?.value;if(!classId||!fdBookingClient)return alert('Choose a class and client.');const {data,error}=await sb.rpc('staff_book_client',{p_class_id:classId,p_client_id:fdBookingClient.id});if(error)return alert(error.message);fdBookingClient=null;await loadAll();alert(data?.payment_status==='pending'?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.'):(data?.status==='waitlist'?'Client added to waitlist.':'Client booked using their valid package.'))}
+function manualBookingPayment(bookingId,clientName){const ms=db.frontDeskMemberships||[];modal('Add package / collect payment',`<p><b>${esc(clientName)}</b></p><label>Package</label><select id="manualMembership">${ms.map(m=>`<option value="${m.id}">${esc(m.name)} — ${money(m.price)}</option>`).join('')}</select><label>Coupon code <span class="muted">(optional)</span></label><input id="manualCoupon"><label>Payment method</label><select id="manualMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select><button class="btn primary full" onclick="settleManualBooking('${bookingId}')">Collect payment & link package</button>`)}
+async function settleManualBooking(bookingId){const membershipId=$("#manualMembership").value,method=$("#manualMethod").value,coupon=$("#manualCoupon").value.trim();const {error}=await sb.rpc('settle_manual_booking_with_membership',{p_booking_id:bookingId,p_membership_id:membershipId,p_payment_method:method,p_coupon_code:coupon||null});if(error)return alert(error.message);$("#modal").remove();await loadAll();alert('Payment recorded, package linked, and the booking reconciled.')}
+
+
+function openClass(id){const c=db.classes.find(x=>String(x.id)===String(id));if(!c)return;const bs=activeBookings(id),guests=isOwner()?(db.guest_bookings||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled'):(db.guestRoster||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled'),checked=bs.filter(b=>b.status==='checked_in').length+guests.filter(g=>g.status==='checked_in').length,noShows=bs.filter(b=>b.status==='no_show').length+guests.filter(g=>g.status==='no_show').length,wait=bs.filter(b=>b.status==='waitlist').length,pending=bs.filter(b=>b.payment_status==='pending').length,notes=teachingNotesForClass(id);const rows=bs.map(b=>{const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id)),cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null,clientName=cl?.name||roster?.client_name||'Client',n=notes.filter(x=>String(x.client_id)===String(b.client_id));return `<div class="booking-person"><span><b>${esc(clientName)}</b><small>${esc(b.status)} · ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}</small>${n.map(x=>`<small>⚑ ${esc(x.category)}: ${esc(x.note)}</small>`).join('')}</span>${isStaff()?`<span>${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}<button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button>${isOwner()&&b.payment_status==='pending'&&!b.package_order_id?` <button class="btn small primary" onclick="manualOwnerBookingPayment('${b.id}',decodeURIComponent('${encodeURIComponent(clientName)}'))">Add package / collect</button>`:''}</span>`:''}</div>`}).join('');const guestRows=guests.map(g=>`<div class="booking-person"><span><b>${esc(g.guest_name||'Guest')}</b><small>Guest · ${esc(g.status)}${g.host_name?' · invited by '+esc(g.host_name):''}</small></span>${isStaff()&&g.status==='booked'?`<button class="btn small" onclick="checkInGuest('${g.booking_id||g.id}')">Check in guest</button>`:''}</div>`).join('');modal(`${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,`<p><span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}</p><div class="grid three"><div class="card kpi"><div class="label">Booked</div><div class="value">${bs.length+guests.length}</div></div><div class="card kpi"><div class="label">Checked in</div><div class="value">${checked}</div></div><div class="card kpi"><div class="label">Waitlist</div><div class="value">${wait}</div></div></div><p class="muted">No-shows: ${noShows} · Payment pending: ${pending} · Capacity: ${c.capacity||0}</p>${rows}${guestRows||''}${!rows&&!guestRows?'<div class="empty">No bookings yet.</div>':''}${isOwner()?`<div class="toolbar"><button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button><button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button><button class="btn" onclick="substituteClassModal('${c.id}')">Substitute</button></div>`:''}`)}
+function manualOwnerBookingPayment(bookingId,clientName){const ms=sortedMemberships();modal('Add package / collect payment',`<p><b>${esc(clientName)}</b></p><label>Package</label><select id="manualMembership">${ms.map(m=>`<option value="${m.id}">${esc(m.name)} — ${money(m.price)}</option>`).join('')}</select><label>Coupon code <span class="muted">(optional)</span></label><input id="manualCoupon"><label>Payment method</label><select id="manualMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select><button class="btn primary full" onclick="settleManualBooking('${bookingId}')">Collect payment & link package</button>`)}
+
+
+function team(){
+  const month=currentYM();
+  layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="inviteInstructorModal()">+ Invite Staff</button><button class="btn" onclick="teamModal()">+ Add non-login team member</button></div><div class="warning" style="margin-bottom:14px">You can give Booking / Front Desk Duty to an Instructor or Receptionist for the day. Only instructors receive teaching/payroll statistics.</div><table><thead><tr><th>Name</th><th>Role</th><th>This month</th><th>Scheduled</th><th>Total taught</th><th>Class rate</th><th>Est. pay</th><th></th></tr></thead><tbody>${db.team.filter(t=>!t.archived_at).map(t=>{const instructor=String(t.role||'').toLowerCase()==='instructor',s=instructor&&t.auth_user_id?instructorStats(t.auth_user_id,month):{taught:0,scheduled:0,total:0},rate=Number(t.class_rate||0);return `<tr><td><b>${esc(t.name)}</b><div class="muted">${esc(t.email||'')}</div></td><td>${esc(t.role||'')}</td><td>${instructor?`<b>${s.taught}</b>`:'—'}</td><td>${instructor?s.scheduled:'—'}</td><td>${instructor?s.total:'—'}</td><td>${instructor?money(rate):'—'}</td><td>${instructor?`<b>${money(s.taught*rate)}</b>`:'—'}</td><td><button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>${t.auth_user_id?`${instructor?` <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button>`:''} <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Booking Desk today</button> <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button> <button class="btn small danger" onclick="toggleInstructorAccess('${t.id}',${t.invite_status==='disabled'?'true':'false'})">${t.invite_status==='disabled'?'Reactivate':'Deactivate login'}</button>`:` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`}</td></tr>`}).join('')}</tbody></table></div>`,`Team`,`Teaching, payroll and delegated booking/front-desk access`)}
+function inviteInstructorModal(){modal('Invite Staff',`<div class="form"><div><label>Full name</label><input id="iname" required></div><div><label>Email</label><input id="iemail" type="email" required></div><div><label>Phone number</label><input id="iphone" type="tel" required></div><div><label>Access role</label><select id="istaffrole"><option value="instructor">Instructor</option><option value="receptionist">Receptionist</option></select></div><div><label>Rate / commission</label><input id="irate" placeholder="For instructors, e.g. $20/class"></div><div class="full"><p class="muted">Receptionists only receive Booking / Front Desk and POS access on days you activate their duty. They do not receive Finance, Clients, Expenses, Team or Settings.</p><button class="btn primary" onclick="inviteInstructor()">Send invitation</button></div></div>`)}
+async function inviteInstructor(){const name=$("#iname").value.trim(),email=$("#iemail").value.trim().toLowerCase(),phone=$("#iphone").value.trim(),rate=$("#irate").value.trim(),role=$("#istaffrole").value;if(!name||!email||!phone)return alert('Name, email and phone are required.');const btn=document.querySelector('#modal .btn.primary');btn.disabled=true;btn.textContent='Sending…';try{const r=await callStaffAdmin({action:'invite',name,email,phone,role,redirectTo:location.origin});const {error}=await sb.from('team').insert({name,email,phone,role:role==='receptionist'?'Receptionist':'Instructor',rate,auth_user_id:r.user_id,invite_status:'pending'});if(error)throw error;$("#modal").remove();await loadAll();alert((role==='receptionist'?'Receptionist':'Instructor')+' invitation sent.')}catch(e){alert(e.message)}finally{if(btn){btn.disabled=false;btn.textContent='Send invitation'}}}
+async function setFrontDeskDuty(userId,active){if(!isOwner())return;const {error}=await sb.rpc('set_front_desk_duty',{p_user_id:userId,p_active:active});if(error)return alert(error.message);alert(active?'Booking / Front Desk Duty is active for this staff member today.':'Booking / Front Desk Duty ended.');await loadAll();}
+
+
+// ================= CORE THEORY V9.4 FRONT DESK CLOSEOUT =================
+function frontDeskAttendanceState(row){
+  const status=String(row.booking_status||'');
+  const checked=status==='checked_in';
+  const pending=String(row.payment_status||'paid')==='pending';
+  const deducted=!!row.session_deducted_at;
+  const unlimited=Number(row.client_sessions)===999;
+  if(!checked)return {label:status==='no_show'?'No-show':'Not checked in',kind:'neutral',cleared:false};
+  if(pending)return {label:'Checked in · Payment pending',kind:'warning',cleared:false};
+  if(unlimited)return {label:'Checked in · Unlimited package',kind:'good',cleared:true};
+  if(deducted)return {label:'Checked in · Session deducted',kind:'good',cleared:true};
+  return {label:'Checked in · Session NOT deducted',kind:'warning',cleared:false};
+}
+function frontDeskReconciliationRows(){
+  return (db.frontDeskToday||[]).map(r=>({...r,_state:frontDeskAttendanceState(r)}));
+}
+function frontDeskCloseoutStats(){
+  const rows=frontDeskReconciliationRows().filter(r=>r.booking_status==='checked_in');
+  return {
+    attended:rows.length,
+    cleared:rows.filter(r=>r._state.cleared).length,
+    unresolved:rows.filter(r=>!r._state.cleared).length
+  };
+}
+function frontDeskReconciliationHtml(){
+  const rows=frontDeskReconciliationRows();
+  const byClass={};
+  rows.forEach(r=>{if(!byClass[r.class_id])byClass[r.class_id]={name:r.class_name,time:r.class_time,instructor:r.instructor_name,rows:[]};byClass[r.class_id].rows.push(r)});
+  return Object.entries(byClass).map(([classId,g])=>{
+    const attended=g.rows.filter(r=>r.booking_status==='checked_in');
+    const cleared=attended.filter(r=>r._state.cleared).length;
+    const unresolved=attended.filter(r=>!r._state.cleared).length;
+    const reconciled=attended.length>0&&unresolved===0;
+    return `<div class="card"><div class="toolbar"><div><h3 style="margin:0">${esc(g.name)} · ${g.time?formatTime(String(g.time).slice(0,5)):''}</h3><p class="muted">${esc(g.instructor||'')}</p></div><span class="badge ${reconciled?'good':'warning'}">${reconciled?'Reconciled ✓':`${unresolved} unresolved`}</span></div><div class="cart-row"><span>Attended</span><b>${attended.length}</b></div><div class="cart-row"><span>Cleared</span><b>${cleared}</b></div><div class="cart-row"><span>Needs attention</span><b>${unresolved}</b></div>${g.rows.map(r=>`<div class="booking-person"><span><b>${esc(r.client_name)}</b><small>${r._state.label}${r.membership_name?' · '+esc(r.membership_name):''}</small></span><span>${r.booking_status==='checked_in'&&!r._state.cleared?(r.package_order_id?`<button class="btn small primary" onclick="frontDeskPayment('${r.package_order_id}')">Resolve payment</button>`:`<button class="btn small primary" onclick="manualBookingPayment('${r.booking_id}',decodeURIComponent('${encodeURIComponent(r.client_name||'Client')}'))">Resolve</button>`):''}</span></div>`).join('')}</div>`;
+  }).join('');
+}
+function showFrontDeskUnresolved(){
+  const rows=frontDeskReconciliationRows().filter(r=>r.booking_status==='checked_in'&&!r._state.cleared);
+  modal('Unresolved attendees',rows.length?rows.map(r=>`<div class="booking-person"><span><b>${esc(r.client_name)}</b><small>${esc(r.class_name)} · ${r.class_time?formatTime(String(r.class_time).slice(0,5)):''} · ${r._state.label}</small></span><span>${r.package_order_id?`<button class="btn small primary" onclick="frontDeskPayment('${r.package_order_id}')">Resolve payment</button>`:`<button class="btn small primary" onclick="manualBookingPayment('${r.booking_id}',decodeURIComponent('${encodeURIComponent(r.client_name||'Client')}'))">Resolve</button>`}</span></div>`).join(''):'<div class="empty">Everything is reconciled.</div>')}
+function frontdesk(){
+  if(!isFrontDeskStaff()||!db.frontDeskDuty)return account();
+  const s=frontDeskCloseoutStats();
+  layout(`<div class="notice card"><b>Booking / Front Desk Duty is active today.</b><p>Your job is to make sure every person who attended is financially/session cleared. Attendance itself remains with the class instructor/substitute.</p></div><div class="grid three"><div class="card kpi"><div class="label">Attended today</div><div class="value">${s.attended}</div></div><div class="card kpi"><div class="label">Cleared</div><div class="value">${s.cleared}</div></div><div class="card kpi"><div class="label">Unresolved</div><div class="value">${s.unresolved}</div><button class="btn small" onclick="showFrontDeskUnresolved()">View unresolved</button></div></div><div class="spacer"></div><div class="card"><h3>Add a WhatsApp / phone booking</h3><label>Class</label><select id="fdBookClass">${(db.frontDeskBookingClasses||[]).map(c=>`<option value="${c.class_id}">${esc(c.class_date)} · ${c.class_time?formatTime(String(c.class_time).slice(0,5)):''} · ${esc(c.class_name)} · ${esc(c.studio_type||'')}</option>`).join('')}</select><label>Client</label><input id="fdClientSearch" placeholder="Type client name…" oninput="frontDeskBookingClientSearch(this.value)"><div id="fdClientSearchResults"></div><div id="fdSelectedClient" class="muted">No client selected.</div><button class="btn primary" onclick="frontDeskManualBook()">Add client to class</button></div><div class="spacer"></div><div class="card"><h3>Today's reconciliation</h3><p class="muted">A class is reconciled only when every checked-in client is cleared by a deducted session, unlimited package, reward, or settled payment.</p></div>${frontDeskReconciliationHtml()||'<div class="card empty">No bookings today.</div>'}`,'Front Desk','All of today’s classes, attendance/payment status, and closeout')}
+
+
+
+// ================= CORE THEORY V9.5 PACKAGE CLARITY =================
+function packageScopeLabel(scope){
+  return scope==='Pilates'?'Pilates':scope==='Megacore'?'Megacore':'Mix';
+}
+function packageScopeClass(scope){
+  return scope==='Pilates'?'pilates':scope==='Megacore'?'megacore':'mix';
+}
+function packageDisplayName(m){
+  return `${m.name} · ${packageScopeLabel(m.studio_scope||'Both')} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${m.validity_days} days · ${money(m.price)}`;
+}
+function packageSortForClient(arr){
+  return [...(arr||[])].filter(x=>!x.archived_at&&x.active!==false).sort((a,b)=>{
+    const sa=Number(a.sort_order||0),sb=Number(b.sort_order||0);
+    if(sa!==sb)return sa-sb;
+    const aa=Number(a.sessions===999?9999:a.sessions||0),bb=Number(b.sessions===999?9999:b.sessions||0);
+    if(aa!==bb)return aa-bb;
+    return Number(a.price||0)-Number(b.price||0);
+  });
+}
+let clientPackageTab='Pilates';
+function packageTabButton(scope,label){
+  return `<button class="tab ${clientPackageTab===scope?'active':''}" onclick="clientPackageTab='${scope}';packages()">${label}</button>`;
+}
+function packages(){
+  const c=myClient();
+  const scope=clientPackageTab;
+  const list=packageSortForClient(db.memberships.filter(m=>(m.studio_scope||'Both')===scope));
+  layout(`<div class="schedule-tabs package-scope-tabs">
+    ${packageTabButton('Pilates','Pilates')}
+    ${packageTabButton('Megacore','Megacore')}
+    ${packageTabButton('Both','Mix')}
+  </div>
+  <div class="spacer"></div>
+  <div class="grid three">${list.map(m=>`<div class="card package-card">
+    <div class="toolbar"><span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>${m.is_private?'<span class="badge">Private</span>':''}</div>
+    <h3>${esc(m.name)}</h3>
+    <div class="package-price">${money(m.price)}</div>
+    <p><b>${m.sessions===999?'Unlimited':m.sessions+' sessions'}</b> · ${m.validity_days} days</p>
+    <p class="muted">Valid for ${esc(packageScopeLabel(m.studio_scope||'Both'))}${m.is_private?' private sessions':''}</p>
+    <button class="btn primary" onclick="packageRequestModal('${m.id}')">Choose package</button>
+  </div>`).join('')||`<div class="card empty">No ${esc(scope==='Both'?'Mix':scope)} packages available.</div>`}</div>
+  <div class="card notice"><b>Pay at Core Theory</b><p>Choose a package and optionally enter an active coupon code. Your request stays Payment Pending until payment is collected.</p></div>`,
+  `Packages · ${scope==='Both'?'Mix':scope}`,
+  `Current package: ${esc(c?.package||'None')} · ${esc(packageScopeLabel(c?.package_scope||'Both'))} · ${c?.sessions??0} sessions remaining`)
+}
+function packageRequestModal(id){
+  const m=db.memberships.find(x=>String(x.id)===String(id));if(!m)return;
+  modal('Request package',`<div class="card" style="margin-bottom:12px">
+    <span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>
+    <h3>${esc(m.name)}</h3>
+    <div class="package-price">${money(m.price)}</div>
+    <p>${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${m.validity_days} days</p>
+  </div>
+  <label>Coupon code <span class="muted">(optional)</span></label>
+  <input id="requestCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="requestPackage('${m.id}')">Request ${esc(packageScopeLabel(m.studio_scope||'Both'))} package</button>`)
+}
+function clientBook(classId){
+  const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+  const rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===classScope));
+  const currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+  const option=(m)=>`<option value="buy:${m.id}">${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+  modal('How would you like to book?',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+  </div>
+  <label>Booking option</label>
+  <select id="bookPackage">
+    ${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE</option>`).join('')}
+    ${currentOk?`<option value="current">Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))} · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}</option>`:''}
+    ${exact.length?`<optgroup label="${esc(classScope)} packages">${exact.map(option).join('')}</optgroup>`:''}
+    ${mix.length?`<optgroup label="Mix packages">${mix.map(option).join('')}</optgroup>`:''}
+  </select>
+  <p class="muted">Only packages valid for this ${esc(classScope)} class are shown. Package type, sessions and price are always displayed so same-name packages are easy to tell apart.</p>
+  <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+  <input id="bookCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)
+}
+function frontDeskMembershipOption(m,selected=''){
+  return `<option value="${m.id}" ${String(m.id)===String(selected)?'selected':''}>${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+}
+function manualBookingPayment(bookingId,clientName){
+  const ms=packageSortForClient(db.frontDeskMemberships||[]);
+  modal('Add package / collect payment',`<p><b>${esc(clientName)}</b></p>
+  <label>Package</label><select id="manualMembership">${ms.map(m=>frontDeskMembershipOption(m)).join('')}</select>
+  <label>Coupon code <span class="muted">(optional)</span></label><input id="manualCoupon">
+  <label>Payment method</label><select id="manualMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select>
+  <button class="btn primary full" onclick="settleManualBooking('${bookingId}')">Collect payment & link package</button>`)
+}
+function manualOwnerBookingPayment(bookingId,clientName){
+  const ms=packageSortForClient(sortedMemberships());
+  modal('Add package / collect payment',`<p><b>${esc(clientName)}</b></p>
+  <label>Package</label><select id="manualMembership">${ms.map(m=>frontDeskMembershipOption(m)).join('')}</select>
+  <label>Coupon code <span class="muted">(optional)</span></label><input id="manualCoupon">
+  <label>Payment method</label><select id="manualMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select>
+  <button class="btn primary full" onclick="settleManualBooking('${bookingId}')">Collect payment & link package</button>`)
+}
+function frontDeskPayment(orderId){
+  const r=(db.frontDeskToday||[]).find(x=>String(x.package_order_id)===String(orderId));
+  const opts=packageSortForClient(db.frontDeskMemberships||[]).map(m=>frontDeskMembershipOption(m,r?.membership_id)).join('');
+  modal('Collect payment',`<p><b>${esc(r?.client_name||'Client')}</b></p>
+  <label>Package</label><select id="fdMembership">${opts}</select>
+  <div class="toolbar"><button class="btn" onclick="changeFrontDeskPackage('${orderId}')">Change pending package</button></div>
+  <label>Payment method</label><select id="fdPayMethod"><option>Cash</option><option>Card</option><option>Whish</option><option>Transfer</option></select>
+  <button class="btn primary full" onclick="settleFrontDeskPayment('${orderId}')">Collect payment</button>`)
+}
+function ownerChangePendingPackage(orderId){
+  const o=db.package_orders.find(x=>String(x.id)===String(orderId));
+  modal('Change pending package',`<label>Package / session</label>
+  <select id="ownerPendingMembership">${packageSortForClient(db.memberships).map(m=>frontDeskMembershipOption(m,o?.membership_id)).join('')}</select>
+  <button class="btn primary full" onclick="ownerSavePendingPackage('${orderId}')">Save change</button>
+  <p class="muted">Package type, sessions and price are shown to avoid mixing up same-name Pilates, Megacore and Mix packages.</p>`)
+}
+function memberships(){
+  const ms=sortedMemberships();
+  layout(`<div class="card"><div class="toolbar"><button class="btn primary" onclick="membershipModal()">+ Add membership</button></div>${ms.length?ms.map((m,i)=>`<div class="cart-row"><span><b>${esc(m.name)}</b> <span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>${m.is_private?' <span class="badge">Private Session</span>':''}<small>${m.is_private?'Private Session':(m.sessions===999?'Unlimited':m.sessions+' sessions')} · ${m.validity_days} days · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${money(m.price)}</small></span><span class="row"><button class="btn small" ${i===0?'disabled':''} onclick="moveMembership('${m.id}',-1)">↑</button><button class="btn small" ${i===ms.length-1?'disabled':''} onclick="moveMembership('${m.id}',1)">↓</button><button class="btn small" onclick="editMembership('${m.id}')">Edit</button><button class="btn small danger" onclick="archiveRecord('memberships','${m.id}')">Archive</button></span></div>`).join(''):'<div class="empty">No memberships yet.</div>'}</div>`,`Memberships`,`Pilates, Megacore and Mix packages are clearly labelled`)}
+
+function applyPackageClarityStyle(){
+  if(document.getElementById('coreTheoryPackageClarity'))return;
+  const s=document.createElement('style');s.id='coreTheoryPackageClarity';
+  s.textContent=`
+    .package-scope-tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .package-scope-tabs .tab{min-width:110px}
+    .package-card .badge{margin-right:6px}
+    .package-card h3{margin-top:14px}
+  `;
+  document.head.appendChild(s);
+}
+
+
+// ================= CORE THEORY V9.6 PACKAGE FLOW POLISH =================
+function packageScopeOrder(scope){
+  return scope==='Pilates'?0:scope==='Megacore'?1:2;
+}
+function packageSortForClient(arr){
+  return [...(arr||[])].filter(x=>!x.archived_at&&x.active!==false).sort((a,b)=>{
+    const scopeDiff=packageScopeOrder(a.studio_scope||'Both')-packageScopeOrder(b.studio_scope||'Both');
+    if(scopeDiff!==0)return scopeDiff;
+    const sa=Number(a.sort_order||0),sb=Number(b.sort_order||0);
+    if(sa!==sb)return sa-sb;
+    const aa=Number(a.sessions===999?9999:a.sessions||0),bb=Number(b.sessions===999?9999:b.sessions||0);
+    if(aa!==bb)return aa-bb;
+    return Number(a.price||0)-Number(b.price||0);
+  });
+}
+function packageSummaryHtml(m){
+  if(!m)return '';
+  return `<div class="package-confirm-card">
+    <div class="toolbar">
+      <span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>
+      ${m.is_private?'<span class="badge">Private</span>':''}
+    </div>
+    <h3>${esc(m.name)}</h3>
+    <div class="package-price">${money(m.price)}</div>
+    <p><b>${m.sessions===999?'Unlimited':m.sessions+' sessions'}</b> · ${m.validity_days} days</p>
+    <p class="muted">Valid for ${esc(packageScopeLabel(m.studio_scope||'Both'))}${m.is_private?' private sessions':''}</p>
+  </div>`;
+}
+function packageRequestModal(id){
+  const m=db.memberships.find(x=>String(x.id)===String(id));if(!m)return;
+  modal('Confirm package',`${packageSummaryHtml(m)}
+  <label>Coupon code <span class="muted">(optional)</span></label>
+  <input id="requestCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="requestPackage('${m.id}')">Confirm package request</button>
+  <button class="btn full" onclick="$('#modal').remove()">Go back</button>`)
+}
+function confirmClientBooking(classId){
+  const choice=$("#bookPackage")?.value||'',coupon=$("#bookCoupon")?.value.trim()||'';
+  const cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!cl)return alert('Class not found.');
+  if(!choice)return alert('Choose how you would like to book.');
+
+  if(choice.startsWith('buy:')){
+    const membershipId=choice.split(':')[1];
+    const m=db.memberships.find(x=>String(x.id)===String(membershipId));
+    if(!m)return alert('Package not found.');
+    const classScope=cl.studio_type||'Pilates';
+    if(!((m.studio_scope||'Both')==='Both'||(m.studio_scope||'Both')===classScope)){
+      return alert(`This ${packageScopeLabel(m.studio_scope||'Both')} package cannot be used for a ${classScope} class.`);
+    }
+    modal('Confirm booking',`<div class="card" style="margin-bottom:12px">
+      <b>${esc(cl.class_type)}</b>
+      <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+    </div>
+    ${packageSummaryHtml(m)}
+    ${coupon?`<p><b>Coupon:</b> ${esc(coupon)}</p>`:''}
+    <p class="muted">Your booking/package request will remain payment pending until Core Theory collects payment.</p>
+    <button class="btn primary full" onclick="submitClientBooking('${classId}','${choice}','${encodeURIComponent(coupon)}')">Confirm booking</button>
+    <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">Change option</button>`);
+    return;
+  }
+
+  const c=myClient();
+  const text=choice==='current'
+    ?`Use current package · ${packageScopeLabel(c?.package_scope||'Both')} · ${c?.sessions===999?'Unlimited':(c?.sessions??0)+' sessions left'}`
+    :`Use free reward`;
+  modal('Confirm booking',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(cl.studio_type||'Pilates')} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+  </div>
+  <p><b>${esc(text)}</b></p>
+  <button class="btn primary full" onclick="submitClientBooking('${classId}','${choice}','')">Confirm booking</button>
+  <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">Change option</button>`);
+}
+async function submitClientBooking(classId,choice,couponEncoded){
+  const coupon=decodeURIComponent(couponEncoded||'');
+  let packageChoice='current',membershipId=null,rewardId=null;
+  if(choice.startsWith('buy:')){packageChoice='buy';membershipId=choice.split(':')[1]}
+  else if(choice.startsWith('reward:')){packageChoice='reward';rewardId=choice.split(':')[1]}
+  const {data,error}=await sb.rpc('book_class_v3',{
+    p_class_id:String(classId),
+    p_choice:packageChoice,
+    p_membership_id:membershipId,
+    p_coupon_code:coupon||null,
+    p_reward_id:rewardId
+  });
+  if(error)return alert(error.message);
+  $("#modal")?.remove();
+  await loadAll();
+  alert(data?.status==='waitlist'?'You are on the waitlist.':packageChoice==='buy'?'Class booked. Package payment is pending.':'Class booked.');
+}
+function clienthome(){
+  const c=myClient(),packages=db.client_packages.filter(p=>String(p.client_id)===String(c?.id)),active=packages.find(p=>p.status==='active'),upcomingPkg=packages.find(p=>p.status==='upcoming'),rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c?.id)&&r.status==='active'&&r.sessions_remaining>0&&r.valid_until>=today()),birthday=rewards.find(r=>r.reward_type==='birthday'),events=db.studio_events.filter(e=>!e.archived_at&&e.active&&e.start_date<=today()&&e.end_date>=today()&&(e.audience==='Clients'||e.audience==='Everyone')),notifs=(db.client_notifications||[]).filter(n=>String(n.client_id)===String(c?.id)&&!n.dismissed_at),mine=db.bookings.filter(b=>String(b.client_id)===String(c?.id)&&!['cancelled','no_show'].includes(b.status)),upcoming=mine.map(b=>({b,cl:db.classes.find(x=>String(x.id)===String(b.class_id))})).filter(x=>x.cl&&!x.cl.cancelled&&new Date(`${x.cl.class_date}T${String(x.cl.class_time||'00:00').slice(0,8)}`)>=new Date()).sort((a,b)=>(a.cl.class_date+a.cl.class_time).localeCompare(b.cl.class_date+b.cl.class_time)),next=upcoming[0],pending=db.package_orders.find(o=>String(o.client_id)===String(c?.id)&&o.status==='pending'),warn=packageWarning(c),history=(db.client_payments||[]).slice(0,5);
+  layout(`${notifs.map(n=>`<div class="notice card" style="margin-bottom:12px"><b>${esc(n.title)}</b><p>${esc(n.message)}</p></div>`).join('')}
+  <div class="grid three">
+    <div class="card kpi"><div class="label">Current package</div><div class="value" style="font-size:20px">${esc(active?.package_name||c?.package||'None')}</div><small>${esc(packageScopeLabel(active?.studio_scope||c?.package_scope||'Both'))}</small></div>
+    <div class="card kpi"><div class="label">Sessions left</div><div class="value">${active?.sessions_remaining??c?.sessions??0}</div></div>
+    <div class="card kpi"><div class="label">Expiry</div><div class="value" style="font-size:20px">${esc(active?.expiry||c?.expiry||'—')}</div></div>
+  </div>
+  ${birthday?`<div class="notice card" style="margin-top:12px"><b>🎂 Happy Birthday from Core Theory!</b><p>You have 1 free session of your choice, valid until ${esc(birthday.valid_until)}.</p></div>`:''}
+  ${events.map(e=>`<div class="notice card" style="margin-top:12px"><b>${esc(e.title)}</b><p>${esc(e.description||'')} · Valid ${esc(e.start_date)} to ${esc(e.end_date)}</p>${e.event_type==='guest_pass'?`<button class="btn primary" onclick="window.v1013StartGuestEvent('${e.id}')">Bring a guest</button>`:''}</div>`).join('')}
+  ${upcomingPkg?`<div class="notice card" style="margin-top:12px"><b>Upcoming package</b><p>${esc(upcomingPkg.package_name)} · ${esc(packageScopeLabel(upcomingPkg.studio_scope||'Both'))} · ${upcomingPkg.sessions_total===999?'Unlimited':upcomingPkg.sessions_total+' sessions'} · activates after your current package finishes.</p></div>`:''}
+  ${warn?`<div class="warning" style="margin-top:12px">${esc(warn)}</div>`:''}
+  ${pending?`<div class="notice card" style="margin-top:12px"><b>Payment pending</b><p>Your selected package is waiting for payment at Core Theory.</p></div>`:''}
+  <div class="spacer"></div>
+  <div class="card"><h3>Next class</h3>${next?`<div class="booking-person"><span><b>${esc(next.cl.class_type||'Class')}</b><small>${esc(next.cl.class_date)} · ${formatTime((next.cl.class_time||'00:00').slice(0,5))} · ${esc(next.cl.studio_type||'Pilates')}</small></span><button class="btn" onclick="page='mybookings';render()">My bookings</button></div>`:'<div class="empty">No upcoming booking.</div>'}<button class="btn primary" onclick="page='book';render()">Book a Class</button></div>
+  <div class="spacer"></div>
+  <div class="card"><h3>Recent payments</h3>${history.map(p=>`<div class="cart-row"><span><b>${esc(p.description||'Payment')}</b><small>${new Date(p.created_at).toLocaleDateString()} · ${esc(p.payment_method||'')}${p.coupon_code?` · Coupon ${esc(p.coupon_code)}`:''}</small></span><b>${money(p.total)}</b></div>`).join('')||'<div class="empty">No payment history yet.</div>'}</div>`,
+  `Home`,`Your Core Theory account`)
+}
+function applyPackageFlowStyle(){
+  if(document.getElementById('coreTheoryPackageFlow'))return;
+  const s=document.createElement('style');s.id='coreTheoryPackageFlow';
+  s.textContent=`
+    .package-confirm-card{border:1px solid rgba(0,0,0,.08);border-radius:14px;padding:14px;margin:12px 0;background:#fff}
+    .package-confirm-card h3{margin:10px 0 6px}
+    .package-confirm-card .badge{margin-right:6px}
+  `;
+  document.head.appendChild(s);
+}
+
+
+// ================= CORE THEORY V9.7 CLIENT BOOKING CUTOFF =================
+function clientClassStart(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+}
+function clientMinutesUntilClass(c){
+  return Math.floor((clientClassStart(c).getTime()-Date.now())/60000);
+}
+function clientBookingClosed(c){
+  const ms=clientClassStart(c).getTime()-Date.now();
+  return ms < 60*60*1000; // exactly 60 minutes is still bookable; 59:59 or less is closed
+}
+function clientClassIsPast(c){
+  return clientClassStart(c).getTime()<=Date.now();
+}
+function book(){
+  const days=[];
+  for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(dateISO(d))}
+  const cs=db.classes
+    .filter(c=>days.includes(c.class_date)&&!c.cancelled&&!clientClassIsPast(c))
+    .filter(c=>(c.studio_type||'Pilates')===studioTab)
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  layout(`<div class="schedule-tabs">
+    <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+    <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+  </div>
+  <div class="client-class-grid">${cs.map(c=>{
+    const n=bookingCount(c.id),full=n>=Number(c.capacity||0),closed=clientBookingClosed(c);
+    return `<div class="card client-class">
+      <div class="date">${new Date(c.class_date+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div>
+      <h3>${esc(c.class_type)}</h3>
+      <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+      <p>${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'')}</p>
+      <p class="muted">${Math.max(0,Number(c.capacity||0)-n)} spots remaining</p>
+      ${closed
+        ? `<button class="btn" disabled>Booking closed</button><small class="muted">Bookings close 1 hour before class.</small>`
+        : `<button class="btn primary" ${full?'disabled':''} onclick="clientBook('${c.id}')">${full?'Full':'Book'}</button>`
+      }
+    </div>`;
+  }).join('')||'<div class="empty">No upcoming classes.</div>'}</div>`,
+  `Book a Class`,
+  `Only upcoming classes are shown. Online booking closes 1 hour before class.`)
+}
+function clientBook(classId){
+  const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+  if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+  const rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===classScope));
+  const currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+  const option=(m)=>`<option value="buy:${m.id}">${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+
+  modal('How would you like to book?',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+  </div>
+  <label>Booking option</label>
+  <select id="bookPackage">
+    ${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE</option>`).join('')}
+    ${currentOk?`<option value="current">Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))} · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}</option>`:''}
+    ${exact.length?`<optgroup label="${esc(classScope)} packages">${exact.map(option).join('')}</optgroup>`:''}
+    ${mix.length?`<optgroup label="Mix packages">${mix.map(option).join('')}</optgroup>`:''}
+  </select>
+  <p class="muted">Only packages valid for this ${esc(classScope)} class are shown. Online booking closes 1 hour before the class starts.</p>
+  <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+  <input id="bookCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)
+}
+
+
+// ================= CORE THEORY V9.8 CAPACITY + OWNER OVERRIDE =================
+function clientBookingCapacityState(c){
+  const booked=bookingCount(c.id);
+  const capacity=Number(c.capacity||0);
+  return {booked,capacity,spaces:Math.max(0,capacity-booked),full:booked>=capacity};
+}
+function book(){
+  const days=[];
+  for(let i=0;i<14;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(dateISO(d))}
+  const cs=db.classes
+    .filter(c=>days.includes(c.class_date)&&!c.cancelled&&!clientClassIsPast(c))
+    .filter(c=>(c.studio_type||'Pilates')===studioTab)
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  layout(`<div class="schedule-tabs">
+    <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+    <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+  </div>
+  <div class="client-class-grid">${cs.map(c=>{
+    const cap=clientBookingCapacityState(c),closed=clientBookingClosed(c);
+    return `<div class="card client-class">
+      <div class="date">${new Date(c.class_date+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div>
+      <h3>${esc(c.class_type)}</h3>
+      <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+      <p>${formatTime((c.class_time||'00:00').slice(0,5))} · ${esc(c.instructor||'')}</p>
+      <p class="muted">${cap.full?'Class is full':`${cap.spaces} spot${cap.spaces===1?'':'s'} remaining`}</p>
+      ${closed
+        ? `<button class="btn" disabled>Booking closed</button><small class="muted">Bookings close 1 hour before class.</small>`
+        : cap.full
+          ? `<button class="btn" disabled>Full</button>`
+          : `<button class="btn primary" onclick="clientBook('${c.id}')">Book</button>`
+      }
+    </div>`;
+  }).join('')||'<div class="empty">No upcoming classes.</div>'}</div>`,
+  `Book a Class`,
+  `Clients can only book if a spot is available. Online booking closes 1 hour before class.`)
+}
+function clientBook(classId){
+  const c=myClient(),cl=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+  const cap=clientBookingCapacityState(cl);
+  if(cap.full)return alert('This class is full.');
+  if(db.bookings.some(b=>String(b.class_id)===String(classId)&&String(b.client_id)===String(c.id)&&b.status!=='cancelled'))return alert('You are already booked.');
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+  const rewards=db.client_rewards.filter(r=>String(r.client_id)===String(c.id)&&r.status==='active'&&Number(r.sessions_remaining)>0&&r.valid_from<=today()&&r.valid_until>=today()&&(r.studio_scope==='Both'||r.studio_scope===classScope));
+  const currentOk=(Number(c.sessions)===999||Number(c.sessions)>0)&&(!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+  const option=(m)=>`<option value="buy:${m.id}">${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))} · ${m.sessions===999?'Unlimited':m.sessions+' sessions'} · ${money(m.price)}</option>`;
+
+  modal('How would you like to book?',`<div class="card" style="margin-bottom:12px">
+    <b>${esc(cl.class_type)}</b>
+    <p class="muted">${esc(classScope)} · ${esc(cl.class_date)} · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}</p>
+    <p class="muted">${cap.spaces} spot${cap.spaces===1?'':'s'} remaining</p>
+  </div>
+  <label>Booking option</label>
+  <select id="bookPackage">
+    ${rewards.map(r=>`<option value="reward:${r.id}">${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE</option>`).join('')}
+    ${currentOk?`<option value="current">Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))} · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}</option>`:''}
+    ${exact.length?`<optgroup label="${esc(classScope)} packages">${exact.map(option).join('')}</optgroup>`:''}
+    ${mix.length?`<optgroup label="Mix packages">${mix.map(option).join('')}</optgroup>`:''}
+  </select>
+  <p class="muted">Only packages valid for this ${esc(classScope)} class are shown. Online booking closes 1 hour before class.</p>
+  <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+  <input id="bookCoupon" placeholder="Enter coupon code">
+  <button class="btn primary full" onclick="confirmClientBooking('${classId}')">Confirm booking</button>`)
+}
+async function staffBook(classId){
+  const clientId=$("#bkclient").value;if(!clientId)return;
+  const {data,error}=await sb.rpc('staff_book_client',{p_class_id:String(classId),p_client_id:String(clientId),p_owner_force:isOwner()});
+  if(error)return alert(error.message);
+  $("#modal").remove();await loadAll();
+  alert(data?.payment_status==='pending'
+    ?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.')
+    :(data?.status==='waitlist'?'Client added to waitlist.':'Client booked.'));
+  openClass(classId)
+}
+async function frontDeskManualBook(){
+  const classId=$("#fdBookClass")?.value;
+  if(!classId||!fdBookingClient)return alert('Choose a class and client.');
+  const {data,error}=await sb.rpc('staff_book_client',{p_class_id:classId,p_client_id:fdBookingClient.id,p_owner_force:false});
+  if(error)return alert(error.message);
+  fdBookingClient=null;await loadAll();
+  alert(data?.payment_status==='pending'
+    ?(data?.status==='waitlist'?'Client added to waitlist. Payment is pending.':'Client booked. Payment is pending because there is no valid session/package.')
+    :(data?.status==='waitlist'?'Client added to waitlist.':'Client booked using their valid package.'))
+}
+
+
+let deferredInstallPrompt=null;
+function isStandalonePWA(){return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true}
+function isiOSDevice(){return /iphone|ipad|ipod/i.test(navigator.userAgent)}
+function showPWAInstallHelp(){
+  if(isStandalonePWA())return alert('Core Theory is already installed on this device.');
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt.userChoice.finally(()=>{deferredInstallPrompt=null;updatePWAInstallButton()});
+    return;
+  }
+  if(isiOSDevice()){
+    modal('Install Core Theory',`<div class="card"><h3>Add Core Theory to your Home Screen</h3><p>1. Open Core Theory in <b>Safari</b>.</p><p>2. Tap the <b>Share</b> button.</p><p>3. Tap <b>Add to Home Screen</b>.</p><p>4. Tap <b>Add</b>.</p><p class="muted">It will open like an app in its own window.</p></div>`);
+  }else{
+    modal('Install Core Theory',`<div class="card"><h3>Install Core Theory</h3><p>Use your browser menu and choose <b>Install app</b> or <b>Add to Home Screen</b>.</p></div>`);
+  }
+}
+function updatePWAInstallButton(){
+  let b=document.getElementById('coreTheoryInstallButton');
+  if(isStandalonePWA()){if(b)b.remove();return}
+  if(!window.matchMedia('(max-width: 900px)').matches)return;
+  if(!b){
+    b=document.createElement('button');
+    b.id='coreTheoryInstallButton';
+    b.type='button';
+    b.className='core-pwa-install';
+    b.textContent='Install Core Theory';
+    b.onclick=showPWAInstallHelp;
+    document.body.appendChild(b);
+  }
+}
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;updatePWAInstallButton()});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updatePWAInstallButton()});
+window.addEventListener('load',()=>setTimeout(updatePWAInstallButton,700));
+function applyPWAStyles(){
+  if(document.getElementById('coreTheoryPWAStyle'))return;
+  const s=document.createElement('style');s.id='coreTheoryPWAStyle';
+  s.textContent=`.core-pwa-install{position:fixed;right:14px;bottom:14px;z-index:9999;border:0;border-radius:999px;padding:11px 15px;background:#722F37;color:#fff!important;-webkit-text-fill-color:#fff!important;font:600 14px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18);cursor:pointer}@media(min-width:901px){.core-pwa-install{display:none}}@media(display-mode:standalone){.core-pwa-install{display:none!important}}body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}`;
+  document.head.appendChild(s);
+}
+
+
+// ================= CORE THEORY V9.10 MOBILE SIDE NAV =================
+function applyMobileSideNav(){
+  if(document.getElementById('coreTheoryMobileSideNav'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryMobileSideNav';
+  s.textContent=`
+    @media(max-width:760px){
+      /* Keep navigation as a visible vertical sidebar instead of a horizontal top strip */
+      .sidebar{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:190px !important;
+        height:100dvh !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        z-index:1000 !important;
+        padding-top:env(safe-area-inset-top) !important;
+        padding-bottom:env(safe-area-inset-bottom) !important;
+      }
+
+      .sidebar .nav,
+      .nav{
+        display:flex !important;
+        flex-direction:column !important;
+        flex-wrap:nowrap !important;
+        overflow:visible !important;
+        width:100% !important;
+        gap:8px !important;
+      }
+
+      .sidebar .nav button,
+      .sidebar .nav .nav-item{
+        width:100% !important;
+        min-width:0 !important;
+        white-space:normal !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .main,
+      main,
+      .content,
+      .page-content{
+        margin-left:190px !important;
+        width:calc(100% - 190px) !important;
+        max-width:calc(100% - 190px) !important;
+      }
+
+      /* Prevent top horizontal nav behavior on phone */
+      .mobile-nav,
+      .top-nav,
+      .nav-scroll,
+      .nav-wrapper{
+        overflow-x:visible !important;
+        white-space:normal !important;
+      }
+
+      /* Make content usable on narrow phones beside the sidebar */
+      .grid,
+      .grid.two,
+      .grid.three,
+      .grid.kpis{
+        grid-template-columns:1fr !important;
+      }
+
+      table{
+        display:block;
+        overflow-x:auto;
+        max-width:100%;
+      }
+
+      .card{
+        max-width:100%;
+        box-sizing:border-box;
+      }
+    }
+
+    @media(max-width:430px){
+      .sidebar{
+        width:165px !important;
+      }
+      .main,
+      main,
+      .content,
+      .page-content{
+        margin-left:165px !important;
+        width:calc(100% - 165px) !important;
+        max-width:calc(100% - 165px) !important;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+
+// ================= CORE THEORY V9.11 MOBILE DRAWER NAV =================
+function openMobileMenu(){
+  document.body.classList.add('mobile-menu-open');
+}
+function closeMobileMenu(){
+  document.body.classList.remove('mobile-menu-open');
+}
+function toggleMobileMenu(){
+  document.body.classList.toggle('mobile-menu-open');
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+        <div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div>
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+          <button class="btn" onclick="loadAll()">Refresh</button>
+        </div>
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
+function applyMobileDrawerNav(){
+  if(document.getElementById('coreTheoryMobileDrawerNav'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryMobileDrawerNav';
+  s.textContent=`
+    .mobile-menu-button,.mobile-menu-backdrop,.drawer-close,.mobile-drawer-head,.mobile-role-label{display:none}
+
+    @media(max-width:760px){
+      body.mobile-menu-open{overflow:hidden}
+
+      .app{display:block !important}
+
+      .main,main,.content,.page-content{
+        margin-left:0 !important;
+        width:100% !important;
+        max-width:100% !important;
+        padding-left:14px !important;
+        padding-right:14px !important;
+        box-sizing:border-box !important;
+      }
+
+      .sidebar{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:min(82vw,300px) !important;
+        height:100dvh !important;
+        z-index:1200 !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        transform:translateX(-102%) !important;
+        transition:transform .22s ease !important;
+        padding:calc(14px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom)) !important;
+        box-sizing:border-box !important;
+        box-shadow:8px 0 28px rgba(0,0,0,.22) !important;
+      }
+
+      body.mobile-menu-open .sidebar{
+        transform:translateX(0) !important;
+      }
+
+      .mobile-menu-backdrop{
+        display:block !important;
+        position:fixed;
+        inset:0;
+        background:rgba(0,0,0,.36);
+        z-index:1190;
+        opacity:0;
+        visibility:hidden;
+        transition:opacity .22s ease,visibility .22s ease;
+      }
+
+      body.mobile-menu-open .mobile-menu-backdrop{
+        opacity:1;
+        visibility:visible;
+      }
+
+      .mobile-menu-button{
+        display:inline-grid !important;
+        place-items:center;
+        flex:0 0 auto;
+        width:42px;
+        height:42px;
+        border:0;
+        border-radius:12px;
+        background:#722F37;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+        font-size:23px !important;
+        line-height:1;
+        padding:0;
+      }
+
+      .mobile-title-row{
+        display:flex;
+        align-items:flex-start;
+        gap:10px;
+        min-width:0;
+      }
+
+      .topbar{
+        align-items:flex-start !important;
+        gap:10px !important;
+      }
+
+      .topbar h1{
+        font-size:24px !important;
+        line-height:1.15 !important;
+        margin-top:2px !important;
+      }
+
+      .mobile-drawer-head{
+        display:flex !important;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom:8px;
+      }
+
+      .drawer-wordmark{
+        display:flex;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:center;
+        line-height:1;
+        padding:2px 0 4px;
+      }
+
+      .drawer-wordmark-core{
+        color:#722F37 !important;
+        -webkit-text-fill-color:#722F37 !important;
+        font-family:Georgia,"Times New Roman",serif;
+        font-size:31px;
+        font-weight:700;
+        letter-spacing:-1.8px;
+        line-height:.86;
+      }
+
+      .drawer-wordmark-theory{
+        margin-top:6px;
+        color:#8a8a86 !important;
+        -webkit-text-fill-color:#8a8a86 !important;
+        font-family:"Helvetica Neue",Arial,sans-serif;
+        font-size:11px;
+        font-weight:600;
+        letter-spacing:7.2px;
+        line-height:1;
+        padding-left:2px;
+      }
+
+      .drawer-close{
+        display:grid !important;
+        place-items:center;
+        width:38px;
+        height:38px;
+        border:0;
+        background:rgba(255,255,255,.08);
+        border-radius:10px;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+        font-size:28px !important;
+        line-height:1;
+        padding:0;
+      }
+
+      .desktop-brand{display:none !important}
+
+      .mobile-role-label{
+        display:block !important;
+        color:rgba(255,255,255,.68);
+        font-size:12px;
+        text-transform:uppercase;
+        letter-spacing:.08em;
+        padding:0 8px 10px;
+      }
+
+      .sidebar .nav,.nav{
+        display:flex !important;
+        flex-direction:column !important;
+        gap:5px !important;
+        width:100% !important;
+        overflow:visible !important;
+      }
+
+      .sidebar .nav button,.sidebar .nav .nav-item{
+        width:100% !important;
+        min-width:0 !important;
+        padding:12px 13px !important;
+        border-radius:10px !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        white-space:normal !important;
+        font-size:15px !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .sidebar .nav button.active{
+        background:#722F37 !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+      }
+
+      .role-chip{
+        margin-top:16px !important;
+      }
+
+      .logout{
+        width:100% !important;
+        margin-top:8px !important;
+        color:#333 !important;
+        -webkit-text-fill-color:#333 !important;
+      }
+
+      .grid,.grid.two,.grid.three,.grid.kpis{
+        grid-template-columns:1fr !important;
+      }
+
+      table{
+        display:block;
+        overflow-x:auto;
+        max-width:100%;
+      }
+
+      .card{
+        max-width:100%;
+        box-sizing:border-box;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+
+// ================= CORE THEORY V9.15 FLEXIBLE RECURRING CLASSES =================
+const CLASS_DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function classRepeatControls(){
+  const start=new Date((document.getElementById('cldate')?.value||today())+'T12:00:00');
+  const startDay=start.getDay();
+  const baseTime=document.getElementById('cltime')?.value||'08:00';
+  return `
+    <div class="full">
+      <label>How should this class be added?</label>
+      <select id="clrepeatmode" onchange="toggleClassRepeatControls()">
+        <option value="single">One class only</option>
+        <option value="weekly">Repeat weekly</option>
+        <option value="days">Choose days & times</option>
+      </select>
+    </div>
+
+    <div id="clweeklycontrols" class="full" style="display:none">
+      <div class="form">
+        <div>
+          <label>Repeat for</label>
+          <select id="clweeklyweeks">
+            <option value="4">4 weeks</option>
+            <option value="8">8 weeks</option>
+            <option value="12">12 weeks</option>
+            <option value="16">16 weeks</option>
+            <option value="24">24 weeks</option>
+          </select>
+        </div>
+        <div>
+          <label>Same day & time</label>
+          <div class="muted" style="padding-top:11px">Every ${CLASS_DAY_NAMES[startDay]} at ${baseTime?formatTime(baseTime):'—'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="cldaycontrols" class="full" style="display:none">
+      <label>Choose the days and time for each class</label>
+      <div class="repeat-day-list">
+        ${[1,2,3,4,5,6,0].map(day=>`
+          <div class="repeat-day-row">
+            <label class="repeat-day-check">
+              <input type="checkbox" class="cldaycheck" data-day="${day}" ${day===startDay?'checked':''} onchange="toggleRepeatDayTime(${day})">
+              <span>${CLASS_DAY_NAMES[day]}</span>
+            </label>
+            <input type="time" id="cldaytime_${day}" value="${baseTime}" ${day===startDay?'':'disabled'}>
+          </div>
+        `).join('')}
+      </div>
+      <div class="form" style="margin-top:12px">
+        <div>
+          <label>Repeat selected days for</label>
+          <select id="cldaysweeks">
+            <option value="1">This week only</option>
+            <option value="4">4 weeks</option>
+            <option value="8">8 weeks</option>
+            <option value="12">12 weeks</option>
+            <option value="16">16 weeks</option>
+          </select>
+        </div>
+        <div>
+          <label>Start from</label>
+          <div class="muted" style="padding-top:11px">${start.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</div>
+        </div>
+      </div>
+      <p class="muted">For the first week, days before the start date are skipped.</p>
+    </div>
+  `;
+}
+
+function toggleClassRepeatControls(){
+  const mode=$("#clrepeatmode")?.value||'single';
+  const weekly=$("#clweeklycontrols"),days=$("#cldaycontrols");
+  if(weekly)weekly.style.display=mode==='weekly'?'block':'none';
+  if(days)days.style.display=mode==='days'?'block':'none';
+}
+
+function toggleRepeatDayTime(day){
+  const cb=document.querySelector(`.cldaycheck[data-day="${day}"]`);
+  const input=document.getElementById(`cldaytime_${day}`);
+  if(input)input.disabled=!cb?.checked;
+}
+
+function syncClassRepeatStart(){
+  const date=$("#cldate")?.value,time=$("#cltime")?.value;
+  const mode=$("#clrepeatmode")?.value;
+  if(mode!=='days')return;
+  const d=new Date((date||today())+'T12:00:00'),day=d.getDay();
+  document.querySelectorAll('.cldaycheck').forEach(cb=>{
+    if(Number(cb.dataset.day)===day){
+      cb.checked=true;
+      const t=document.getElementById(`cldaytime_${day}`);
+      if(t){t.disabled=false;if(time)t.value=time}
+    }
+  });
+}
+
+function classForm(c={}){
+  return `<div class="form">
+    <div><label>Date</label><input type="date" id="cldate" value="${c.class_date||today()}" onchange="syncClassRepeatStart()"></div>
+    <div><label>Time</label><input type="time" id="cltime" value="${(c.class_time||'').slice(0,5)}" onchange="syncClassRepeatStart()"></div>
+    <div><label>Studio</label><select id="clstudio"><option ${c.studio_type==='Pilates'?'selected':''}>Pilates</option><option ${c.studio_type==='Megacore'?'selected':''}>Megacore</option></select></div>
+    <div><label>Level</label><select id="cllevel">${db.class_levels.map(l=>`<option ${c.level===l.name?'selected':''}>${esc(l.name)}</option>`).join('')}</select></div>
+    <div><label>Class name</label><input id="cltype" value="${esc(c.class_type||'')}" placeholder="Rise & Shine"></div>
+    <div><label>Instructor</label><select id="clinstructor">${db.team.filter(t=>t.role==='Instructor'&&t.auth_user_id).map(t=>`<option value="${t.auth_user_id}" data-name="${esc(t.name)}" ${String(c.instructor_user_id||'')===String(t.auth_user_id)?'selected':''}>${esc(t.name)}</option>`).join('')}<option value="" ${!c.instructor_user_id?'selected':''}>Unassigned</option></select></div>
+    <div><label>Capacity</label><input type="number" id="clcap" min="1" value="${c.capacity||10}"></div>
+    ${!c.id?classRepeatControls():''}
+    <div class="full">
+      <button class="btn primary" onclick="${c.id?`saveClass('${c.id}')`:'addClass()'}">${c.id?'Save changes':'Add class'}</button>
+      ${c.id?` <button class="btn danger" onclick="deleteClass('${c.id}')">Delete</button>`:''}
+    </div>
+  </div>`;
+}
+
+function classModal(){
+  modal('Add class',classForm());
+  setTimeout(()=>toggleClassRepeatControls(),0);
+}
+
+function mondayDate(d){
+  const x=new Date(d);
+  const day=(x.getDay()+6)%7;
+  x.setDate(x.getDate()-day);
+  x.setHours(12,0,0,0);
+  return x;
+}
+
+function selectedClassDayRows(base){
+  const weeks=Math.max(1,Number($("#cldaysweeks")?.value||1));
+  const startDate=new Date(base);
+  const firstMonday=mondayDate(startDate);
+  const selections=[...document.querySelectorAll('.cldaycheck:checked')].map(cb=>({
+    day:Number(cb.dataset.day),
+    time:document.getElementById(`cldaytime_${cb.dataset.day}`)?.value
+  })).filter(x=>x.time);
+
+  if(!selections.length)throw new Error('Choose at least one day.');
+
+  const rows=[];
+  const jsDayToMondayOffset=day=>day===0?6:day-1;
+
+  for(let w=0;w<weeks;w++){
+    for(const s of selections){
+      const d=new Date(firstMonday);
+      d.setDate(firstMonday.getDate()+w*7+jsDayToMondayOffset(s.day));
+      if(d<startDate)continue;
+      rows.push({date:dateISO(d),time:s.time});
+    }
+  }
+  return rows;
+}
+
+async function addClass(){
+  const date=$("#cldate")?.value,time=$("#cltime")?.value,name=$("#cltype")?.value.trim();
+  if(!date||!time||!name)return alert('Date, time and class name are required.');
+
+  const mode=$("#clrepeatmode")?.value||'single';
+  const base=new Date(date+'T12:00:00');
+  const group=crypto.randomUUID();
+  let instances=[];
+
+  try{
+    if(mode==='single'){
+      instances=[{date,time}];
+    }else if(mode==='weekly'){
+      const weeks=Math.max(1,Number($("#clweeklyweeks")?.value||4));
+      for(let i=0;i<weeks;i++){
+        const d=new Date(base);
+        d.setDate(base.getDate()+7*i);
+        instances.push({date:dateISO(d),time});
+      }
+    }else{
+      instances=selectedClassDayRows(base);
+    }
+  }catch(e){
+    return alert(e.message);
+  }
+
+  const instructor=$("#clinstructor");
+  const common={
+    class_type:name,
+    instructor:instructor.selectedOptions[0]?.dataset.name||'',
+    instructor_user_id:instructor.value||null,
+    capacity:+$("#clcap").value||10,
+    studio_type:$("#clstudio").value,
+    level:$("#cllevel").value,
+    recurring_group:instances.length>1?group:null
+  };
+
+  const rows=instances.map(x=>({...common,class_date:x.date,class_time:x.time}));
+
+  // Prevent accidental duplicate entries that already exist at the exact same studio/date/time.
+  const conflicts=rows.filter(r=>db.classes.some(c=>
+    !c.cancelled &&
+    c.class_date===r.class_date &&
+    String(c.class_time||'').slice(0,5)===String(r.class_time).slice(0,5) &&
+    (c.studio_type||'Pilates')===r.studio_type
+  ));
+  if(conflicts.length){
+    const sample=conflicts.slice(0,3).map(r=>`${r.class_date} ${formatTime(String(r.class_time).slice(0,5))}`).join(', ');
+    if(!confirm(`${conflicts.length} selected time slot${conflicts.length===1?' already has':'s already have'} a ${common.studio_type} class (${sample}${conflicts.length>3?'…':''}). Add anyway?`))return;
+  }
+
+  const {error}=await sb.from('classes').insert(rows);
+  if(error)return alert(error.message);
+
+  $("#modal").remove();
+  await loadAll();
+  alert(rows.length===1?'Class added.':`${rows.length} classes added.`);
+}
+
+function applyRecurringClassStyles(){
+  if(document.getElementById('coreTheoryRecurringClassStyles'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryRecurringClassStyles';
+  s.textContent=`
+    .repeat-day-list{display:grid;gap:8px;margin-top:8px}
+    .repeat-day-row{
+      display:grid;
+      grid-template-columns:minmax(120px,1fr) 130px;
+      gap:10px;
+      align-items:center;
+      padding:8px 10px;
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:10px;
+      background:rgba(255,255,255,.55);
+    }
+    .repeat-day-check{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin:0;
+      font-weight:600;
+    }
+    .repeat-day-check input{width:auto}
+    @media(max-width:520px){
+      .repeat-day-row{grid-template-columns:1fr 118px}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+
+function applyPosPromoStyles(){
+  if(document.getElementById('coreTheoryPosPromoStyles'))return;
+  const s=document.createElement('style');
+  s.id='coreTheoryPosPromoStyles';
+  s.textContent=`
+    .pos-promo-box{
+      margin-top:16px;
+      padding-top:14px;
+      border-top:1px solid rgba(0,0,0,.08);
+    }
+    .pos-promo-row{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:8px;
+      align-items:center;
+    }
+    .pos-promo-row input{
+      text-transform:uppercase;
+    }
+    .promo-success{
+      margin-top:8px;
+      padding:9px 11px;
+      border-radius:9px;
+      background:rgba(114,47,55,.08);
+      color:#722F37;
+      font-weight:600;
+      font-size:13px;
+    }
+    .pos-total-lines{
+      margin-top:16px;
+      padding-top:12px;
+      border-top:1px solid rgba(0,0,0,.08);
+      display:grid;
+      gap:7px;
+    }
+    .pos-total-lines>div,.pos-grand-total{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+    .promo-discount{
+      color:#722F37;
+    }
+    .pos-grand-total{
+      margin:8px 0 14px;
+    }
+    .pos-grand-total h2{
+      margin:0;
+    }
+    @media(max-width:520px){
+      .pos-promo-row{grid-template-columns:1fr}
+      .pos-promo-row .btn{width:100%}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+function applyMobileButtonColorFix(){
+  if(document.getElementById('coreTheoryMobileColorFix'))return;
+  const s=document.createElement('style');s.id='coreTheoryMobileColorFix';
+  s.textContent=`
+    button,.btn,.tab,.schedule-tabs button,.schedule-tools button,.topbar button,.logout,.link-btn{
+      color:#333 !important;-webkit-text-fill-color:#333 !important;
+    }
+    button:disabled,.btn:disabled,.tab:disabled{color:#777 !important;-webkit-text-fill-color:#777 !important;}
+    .btn.primary,.nav button.active,.tab.active{
+      color:#fff !important;-webkit-text-fill-color:#fff !important;
+    }
+    .nav button,.nav .nav-item,.sidebar .nav button{
+      color:#fff !important;-webkit-text-fill-color:#fff !important;
+    }
+    .nav button.active,.sidebar .nav button.active{
+      color:#fff !important;-webkit-text-fill-color:#fff !important;
+    }
+    .btn.danger{color:#722F37 !important;-webkit-text-fill-color:#722F37 !important;}
+    @media(max-width:760px){
+      input,select,textarea,button{font-size:16px}
+      .schedule-tabs .tab:not(.active),.schedule-tools .btn,.topbar .btn,.logout{
+        color:#333 !important;-webkit-text-fill-color:#333 !important;
+      }
+      .sidebar .nav button,.sidebar .nav .nav-item{
+        color:#fff !important;-webkit-text-fill-color:#fff !important;
+      }
+    }`;
+  document.head.appendChild(s);
+}
+
+applyMobileButtonColorFix();
+applyClickableAlertStyle();
+applyPackageClarityStyle();
+applyPackageFlowStyle();
+applyPWAStyles();
+applyMobileDrawerNav();
+applyRecurringClassStyles();
+applyPosPromoStyles();
+applyInstructorShiftStyles();
+init();
+
+
+// ================= CORE THEORY — EXACT INSTRUCTOR CLASS HOURS FIX =================
+const CT_SLOT_DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function ctInstructorSlotSummary(t){
+  const slots=(db.instructor_class_slots||[])
+    .filter(s=>String(s.team_id)===String(t.id))
+    .sort((a,b)=>(Number(a.weekday)-Number(b.weekday))||String(a.class_time).localeCompare(String(b.class_time)));
+
+  if(!slots.length)return '<span class="muted">No class hours set</span>';
+
+  const grouped={};
+  slots.forEach(s=>{
+    const d=Number(s.weekday);
+    (grouped[d]??=[]).push(String(s.class_time||'').slice(0,5));
+  });
+
+  return Object.entries(grouped).map(([day,times])=>`
+    <div class="ct-slot-summary">
+      <b>${CT_SLOT_DAYS[Number(day)]}</b>
+      <span>${times.map(t=>formatTime(t)).join(', ')}</span>
+    </div>`).join('');
+}
+
+function instructorSlotsModal(teamId){
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  if(!t)return alert('Instructor not found.');
+
+  const slots=(db.instructor_class_slots||[])
+    .filter(s=>String(s.team_id)===String(t.id))
+    .sort((a,b)=>(Number(a.weekday)-Number(b.weekday))||String(a.class_time).localeCompare(String(b.class_time)));
+
+  modal(`${esc(t.name)} · Class hours`,`
+    <p>Choose the <b>exact class hours</b> ${esc(t.name)} covers on each day.</p>
+    <p class="muted">Example: Monday 8:00 AM, 9:00 AM and 11:00 AM. A Monday 10:00 AM class will stay unassigned unless you add that exact hour.</p>
+
+    <div id="ctSlotRows">
+      ${slots.map(ctSlotRowHtml).join('')}
+    </div>
+
+    <button class="btn" type="button" onclick="ctAddSlotRow()">+ Add class hour</button>
+
+    <div style="margin-top:16px">
+      <button class="btn primary full" type="button" onclick="saveInstructorSlots('${t.id}')">
+        Save class hours & assign schedule
+      </button>
+    </div>
+  `);
+
+  if(!slots.length)ctAddSlotRow();
+}
+
+function ctSlotRowHtml(s={}){
+  return `
+    <div class="ct-slot-row" data-ct-slot-row>
+      <div>
+        <label>Day</label>
+        <select class="ct-slot-day">
+          ${CT_SLOT_DAYS.map((d,i)=>`<option value="${i}" ${Number(s.weekday)===i?'selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>Class time</label>
+        <input class="ct-slot-time" type="time" value="${String(s.class_time||'08:00').slice(0,5)}">
+      </div>
+      <div>
+        <label>Studio</label>
+        <select class="ct-slot-studio">
+          <option value="All" ${(s.studio_scope||'All')==='All'?'selected':''}>All</option>
+          <option value="Pilates" ${s.studio_scope==='Pilates'?'selected':''}>Pilates</option>
+          <option value="Megacore" ${s.studio_scope==='Megacore'?'selected':''}>Megacore</option>
+        </select>
+      </div>
+      <button class="btn small danger" type="button" onclick="this.closest('[data-ct-slot-row]').remove()">×</button>
+    </div>`;
+}
+
+function ctAddSlotRow(){
+  const box=document.getElementById('ctSlotRows');
+  if(box)box.insertAdjacentHTML('beforeend',ctSlotRowHtml({weekday:1,class_time:'08:00',studio_scope:'All'}));
+}
+
+async function saveInstructorSlots(teamId){
+  const rows=[...document.querySelectorAll('[data-ct-slot-row]')].map(r=>({
+    weekday:Number(r.querySelector('.ct-slot-day').value),
+    class_time:r.querySelector('.ct-slot-time').value,
+    studio_scope:r.querySelector('.ct-slot-studio').value
+  }));
+
+  if(rows.some(r=>!r.class_time))return alert('Choose a time for every class hour.');
+
+  const seen=new Set();
+  for(const r of rows){
+    const k=`${r.weekday}|${r.class_time}|${r.studio_scope}`;
+    if(seen.has(k))return alert(`You added ${CT_SLOT_DAYS[r.weekday]} ${formatTime(r.class_time)} more than once.`);
+    seen.add(k);
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {data,error}=await sb.rpc('set_instructor_class_slots',{
+    p_team_id:String(teamId),
+    p_slots:rows
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save class hours & assign schedule'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const assigned=Number(data?.assigned||0);
+  const ambiguous=Number(data?.ambiguous||0);
+  let msg=`Class hours saved. ${assigned} class${assigned===1?' was':'es were'} assigned automatically.`;
+  if(ambiguous)msg+=` ${ambiguous} overlapping exact-time slot${ambiguous===1?' was':'s were'} left unassigned.`;
+  alert(msg);
+}
+
+async function autoAssignUnassignedClasses(showResult=true){
+  const {data,error}=await sb.rpc('auto_assign_classes_from_slots');
+  if(error)return alert(error.message);
+  await loadAll();
+  if(showResult){
+    const assigned=Number(data?.assigned||0);
+    const ambiguous=Number(data?.ambiguous||0);
+    alert(`${assigned} class${assigned===1?'':'es'} assigned.${ambiguous?` ${ambiguous} overlapping exact-time slot${ambiguous===1?'':'s'} left unassigned.`:''}`);
+  }
+}
+
+function team(){
+  const month=currentYM();
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button>
+        <button class="btn" onclick="teamModal()">+ Add non-login team member</button>
+        <button class="btn" onclick="autoAssignUnassignedClasses()">↻ Assign schedule from class hours</button>
+        <input type="month" id="teamMonth" value="${month}" onchange="team()">
+      </div>
+
+      <div class="warning" style="margin-bottom:14px">
+        Choose the exact day and class time each instructor covers. Core Theory only auto-assigns an instructor when that exact slot matches.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Class hours</th>
+            <th>This month</th>
+            <th>Scheduled</th>
+            <th>Total taught</th>
+            <th>Class rate</th>
+            <th>Est. pay</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${db.team.filter(t=>!t.archived_at).map(t=>{
+            const s=t.auth_user_id?instructorStats(t.auth_user_id,month):{taught:0,scheduled:0,total:0};
+            const rate=Number(t.class_rate||0);
+            return `
+              <tr>
+                <td>
+                  <b>${esc(t.name)}</b>
+                  <div class="muted">${esc(t.email||'')}</div>
+                </td>
+                <td>${esc(t.role||'')}</td>
+                <td>${t.role==='Instructor'?ctInstructorSlotSummary(t):'<span class="muted">—</span>'}</td>
+                <td><b>${s.taught}</b></td>
+                <td>${s.scheduled}</td>
+                <td>${s.total}</td>
+                <td>${money(rate)}</td>
+                <td><b>${money(s.taught*rate)}</b></td>
+                <td>
+                  <button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>
+                  ${t.role==='Instructor'?` <button class="btn small" onclick="instructorSlotsModal('${t.id}')">Class hours</button>`:''}
+                  ${t.auth_user_id?`
+                    <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>
+                  `:` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`,
+    `Team`,
+    `Exact class-hour coverage, monthly teaching and payroll tracking`
+  );
+}
+
+(function ctExactSlotStyles(){
+  if(document.getElementById('ctExactSlotStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctExactSlotStyles';
+  s.textContent=`
+    .ct-slot-summary{display:grid;grid-template-columns:80px 1fr;gap:8px;font-size:12px;margin:3px 0}
+    .ct-slot-row{display:grid;grid-template-columns:1.2fr 1fr 1.1fr auto;gap:8px;align-items:end;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}
+    @media(max-width:700px){
+      .ct-slot-row{grid-template-columns:1fr 1fr}
+      .ct-slot-row>div:nth-child(3){grid-column:1/-1}
+      .ct-slot-row>.btn{width:100%}
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+
+// ================= CORE THEORY — SMART SUBSTITUTE PICKER =================
+function ctClassDow(dateStr){
+  return new Date(`${dateStr}T12:00:00`).getDay();
+}
+
+function ctInstructorMatchesSavedSlot(t,c){
+  if(!t?.id||!c)return false;
+  const day=ctClassDow(c.class_date);
+  const time=String(c.class_time||'').slice(0,5);
+  const studio=c.studio_type||'Pilates';
+
+  return (db.instructor_class_slots||[]).some(s=>
+    String(s.team_id)===String(t.id) &&
+    Number(s.weekday)===day &&
+    String(s.class_time||'').slice(0,5)===time &&
+    ((s.studio_scope||'All')==='All' || s.studio_scope===studio)
+  );
+}
+
+function ctInstructorTimeConflict(t,c){
+  if(!t?.auth_user_id||!c)return null;
+
+  return (db.classes||[]).find(other=>
+    String(other.id)!==String(c.id) &&
+    !other.cancelled &&
+    other.class_date===c.class_date &&
+    String(other.class_time||'').slice(0,5)===String(c.class_time||'').slice(0,5) &&
+    String(instructorForClass(other)||'')===String(t.auth_user_id)
+  )||null;
+}
+
+function ctSubstituteCandidateHtml(t,c,currentSub){
+  const slotMatch=ctInstructorMatchesSavedSlot(t,c);
+  const conflict=ctInstructorTimeConflict(t,c);
+  const selected=String(currentSub||'')===String(t.auth_user_id||'');
+
+  let badge='';
+  if(conflict){
+    badge=`<span class="ct-sub-badge conflict">Already teaching ${esc(conflict.class_type||'another class')}</span>`;
+  }else if(slotMatch){
+    badge='<span class="ct-sub-badge good">Available · saved class hour</span>';
+  }else{
+    badge='<span class="ct-sub-badge neutral">Manual option</span>';
+  }
+
+  return `
+    <label class="ct-sub-option ${conflict?'is-conflict':''}">
+      <input
+        type="radio"
+        name="ctSubInstructor"
+        value="${esc(t.auth_user_id||'')}"
+        ${selected?'checked':''}
+        ${conflict&&!selected?'disabled':''}
+      >
+      <span class="ct-sub-copy">
+        <b>${esc(t.name)}</b>
+        ${badge}
+      </span>
+    </label>`;
+}
+
+function substituteClassModal(classId){
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return;
+
+  const current=(db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(classId) && s.active
+  );
+  const currentSub=current?.substitute_instructor||null;
+
+  const original=db.team.find(t=>String(t.auth_user_id||'')===String(c.instructor_user_id||''));
+  const instructors=(db.team||[])
+    .filter(t=>t.role==='Instructor'&&t.auth_user_id&&!t.archived_at)
+    .filter(t=>String(t.auth_user_id)!==String(c.instructor_user_id||''));
+
+  const ranked=instructors.map(t=>({
+    t,
+    slot:ctInstructorMatchesSavedSlot(t,c),
+    conflict:ctInstructorTimeConflict(t,c)
+  })).sort((a,b)=>{
+    if(Boolean(a.conflict)!==Boolean(b.conflict))return a.conflict?1:-1;
+    if(a.slot!==b.slot)return a.slot?-1:1;
+    return String(a.t.name||'').localeCompare(String(b.t.name||''));
+  });
+
+  const recommended=ranked.filter(x=>x.slot&&!x.conflict);
+  const other=ranked.filter(x=>!x.slot&&!x.conflict);
+  const busy=ranked.filter(x=>x.conflict);
+
+  modal('Assign substitute',`
+    <div class="ct-sub-class">
+      <b>${esc(c.class_type||'Class')}</b>
+      <span>${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+      · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+      · ${esc(c.studio_type||'Pilates')}</span>
+    </div>
+
+    <div class="ct-sub-original">
+      <span>Original instructor</span>
+      <b>${esc(original?.name||c.instructor||'Unassigned')}</b>
+    </div>
+
+    <label class="ct-sub-option remove-option">
+      <input type="radio" name="ctSubInstructor" value="" ${!currentSub?'checked':''}>
+      <span class="ct-sub-copy">
+        <b>No substitute</b>
+        <span class="ct-sub-badge neutral">Keep original instructor</span>
+      </span>
+    </label>
+
+    ${recommended.length?`
+      <h3 class="ct-sub-heading">Available for this class</h3>
+      <p class="muted">These instructors have this exact day, time and studio saved in Class hours.</p>
+      <div class="ct-sub-list">
+        ${recommended.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${other.length?`
+      <h3 class="ct-sub-heading">Other instructors</h3>
+      <p class="muted">You can still choose them manually even though this exact class hour is not in their saved schedule.</p>
+      <div class="ct-sub-list">
+        ${other.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${busy.length?`
+      <h3 class="ct-sub-heading">Unavailable at this time</h3>
+      <div class="ct-sub-list">
+        ${busy.map(x=>ctSubstituteCandidateHtml(x.t,c,currentSub)).join('')}
+      </div>`:''}
+
+    ${!instructors.length?'<div class="empty">No other active instructors are available in Team yet.</div>':''}
+
+    <div style="margin-top:18px">
+      <button class="btn primary full" onclick="saveSubstitute('${classId}')">Save substitute</button>
+    </div>
+  `);
+}
+
+async function saveSubstitute(classId){
+  const picked=document.querySelector('input[name="ctSubInstructor"]:checked');
+  const uid=picked?.value||null;
+
+  if(uid){
+    const c=db.classes.find(x=>String(x.id)===String(classId));
+    const t=db.team.find(x=>String(x.auth_user_id||'')===String(uid));
+    const conflict=ctInstructorTimeConflict(t,c);
+    if(conflict){
+      return alert(`${t?.name||'This instructor'} is already teaching ${conflict.class_type||'another class'} at that time.`);
+    }
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {error}=await sb.rpc('set_class_substitute',{
+    p_class_id:classId,
+    p_substitute_user_id:uid
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save substitute'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert(uid?'Substitute assigned. This class will count under the substitute for teaching statistics.':'Substitute removed. The original instructor is back on the class.');
+}
+
+(function ctSmartSubstituteStyles(){
+  if(document.getElementById('ctSmartSubstituteStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctSmartSubstituteStyles';
+  s.textContent=`
+    .ct-sub-class{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      padding:12px 14px;
+      border-radius:12px;
+      background:rgba(114,47,55,.07);
+      margin-bottom:12px;
+    }
+    .ct-sub-original{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 2px 14px;
+      border-bottom:1px solid rgba(0,0,0,.08);
+      margin-bottom:10px;
+    }
+    .ct-sub-original span{color:#6B6B6B;font-size:13px}
+    .ct-sub-heading{margin:18px 0 4px}
+    .ct-sub-list{display:grid;gap:8px;margin-top:8px}
+    .ct-sub-option{
+      display:flex;
+      align-items:center;
+      gap:11px;
+      padding:12px 13px;
+      border:1px solid rgba(0,0,0,.10);
+      border-radius:12px;
+      cursor:pointer;
+      background:#fff;
+    }
+    .ct-sub-option:has(input:checked){
+      border-color:#722F37;
+      box-shadow:0 0 0 1px #722F37 inset;
+      background:rgba(114,47,55,.04);
+    }
+    .ct-sub-option.is-conflict{
+      opacity:.58;
+      cursor:not-allowed;
+    }
+    .ct-sub-option input{
+      width:auto;
+      margin:0;
+      flex:0 0 auto;
+    }
+    .ct-sub-copy{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      width:100%;
+    }
+    .ct-sub-badge{
+      font-size:11px;
+      padding:4px 7px;
+      border-radius:999px;
+      font-weight:600;
+    }
+    .ct-sub-badge.good{background:rgba(114,47,55,.09);color:#722F37}
+    .ct-sub-badge.neutral{background:#eeeae3;color:#666}
+    .ct-sub-badge.conflict{background:#f3dddd;color:#8b2f38}
+    .remove-option{margin-bottom:6px}
+    @media(max-width:600px){
+      .ct-sub-copy{align-items:flex-start;flex-direction:column}
+      .ct-sub-original{align-items:flex-start;flex-direction:column}
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+
+// ================= CORE THEORY — ONE-OFF NON-LOGIN SUBSTITUTE =================
+function ctSubstituteDisplayNameForClass(c){
+  const active=(db.class_substitutions||[]).find(s=>String(s.class_id)===String(c.id)&&s.active);
+  if(!active)return null;
+  return active.substitute_name || db.team.find(t=>String(t.auth_user_id||'')===String(active.substitute_instructor||''))?.name || null;
+}
+
+function substituteClassModal(classId){
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return;
+
+  const current=(db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(classId) && s.active
+  );
+
+  const original=db.team.find(t=>String(t.auth_user_id||'')===String(c.instructor_user_id||''));
+
+  const instructors=(db.team||[])
+    .filter(t=>t.role==='Instructor'&&!t.archived_at)
+    .filter(t=>{
+      const sameAuth=t.auth_user_id && String(t.auth_user_id)===String(c.instructor_user_id||'');
+      const sameName=!t.auth_user_id && String(t.name||'').trim()===String(c.instructor||'').trim();
+      return !(sameAuth||sameName);
+    });
+
+  const ranked=instructors.map(t=>({
+    t,
+    slot:ctInstructorMatchesSavedSlot(t,c),
+    conflict:t.auth_user_id?ctInstructorTimeConflict(t,c):null
+  })).sort((a,b)=>{
+    if(Boolean(a.conflict)!==Boolean(b.conflict))return a.conflict?1:-1;
+    if(a.slot!==b.slot)return a.slot?-1:1;
+    if(Boolean(a.t.auth_user_id)!==Boolean(b.t.auth_user_id))return a.t.auth_user_id?-1:1;
+    return String(a.t.name||'').localeCompare(String(b.t.name||''));
+  });
+
+  const recommended=ranked.filter(x=>x.slot&&!x.conflict);
+  const other=ranked.filter(x=>!x.slot&&!x.conflict);
+  const busy=ranked.filter(x=>x.conflict);
+
+  function candidate(t,conflict=null,slot=false){
+    const isCurrentLogin=current?.substitute_instructor && String(current.substitute_instructor)===String(t.auth_user_id||'');
+    const isCurrentGuest=!current?.substitute_instructor && current?.substitute_team_id && String(current.substitute_team_id)===String(t.id);
+    const selected=isCurrentLogin||isCurrentGuest;
+
+    let badge='';
+    if(conflict){
+      badge=`<span class="ct-sub-badge conflict">Already teaching ${esc(conflict.class_type||'another class')}</span>`;
+    }else if(slot){
+      badge='<span class="ct-sub-badge good">Available · saved class hour</span>';
+    }else if(t.auth_user_id){
+      badge='<span class="ct-sub-badge neutral">Manual option</span>';
+    }else{
+      badge='<span class="ct-sub-badge neutral">One-off · no app access</span>';
+    }
+
+    return `
+      <label class="ct-sub-option ${conflict?'is-conflict':''}">
+        <input
+          type="radio"
+          name="ctSubInstructor"
+          value="${t.auth_user_id?`auth:${esc(t.auth_user_id)}`:`team:${esc(t.id)}`}"
+          ${selected?'checked':''}
+          ${conflict&&!selected?'disabled':''}
+        >
+        <span class="ct-sub-copy">
+          <b>${esc(t.name)}</b>
+          ${badge}
+        </span>
+      </label>`;
+  }
+
+  modal('Assign substitute',`
+    <div class="ct-sub-class">
+      <b>${esc(c.class_type||'Class')}</b>
+      <span>${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+      · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+      · ${esc(c.studio_type||'Pilates')}</span>
+    </div>
+
+    <div class="ct-sub-original">
+      <span>Original instructor</span>
+      <b>${esc(original?.name||c.instructor||'Unassigned')}</b>
+    </div>
+
+    <label class="ct-sub-option remove-option">
+      <input type="radio" name="ctSubInstructor" value="" ${!current?'checked':''}>
+      <span class="ct-sub-copy">
+        <b>No substitute</b>
+        <span class="ct-sub-badge neutral">Keep original instructor</span>
+      </span>
+    </label>
+
+    ${recommended.length?`
+      <h3 class="ct-sub-heading">Available for this class</h3>
+      <p class="muted">Exact saved day, time and studio match.</p>
+      <div class="ct-sub-list">
+        ${recommended.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    ${other.length?`
+      <h3 class="ct-sub-heading">Other instructors</h3>
+      <p class="muted">You can choose any instructor manually. “One-off · no app access” means they can cover the class without receiving a login.</p>
+      <div class="ct-sub-list">
+        ${other.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    ${busy.length?`
+      <h3 class="ct-sub-heading">Unavailable at this time</h3>
+      <div class="ct-sub-list">
+        ${busy.map(x=>candidate(x.t,x.conflict,x.slot)).join('')}
+      </div>`:''}
+
+    <div style="margin-top:18px">
+      <button class="btn primary full" onclick="saveSubstitute('${classId}')">Save substitute</button>
+    </div>
+  `);
+}
+
+async function saveSubstitute(classId){
+  const picked=document.querySelector('input[name="ctSubInstructor"]:checked');
+  const value=picked?.value||'';
+
+  let authUid=null, teamId=null;
+  if(value.startsWith('auth:'))authUid=value.slice(5);
+  if(value.startsWith('team:'))teamId=value.slice(5);
+
+  if(authUid){
+    const c=db.classes.find(x=>String(x.id)===String(classId));
+    const t=db.team.find(x=>String(x.auth_user_id||'')===String(authUid));
+    const conflict=ctInstructorTimeConflict(t,c);
+    if(conflict){
+      return alert(`${t?.name||'This instructor'} is already teaching ${conflict.class_type||'another class'} at that time.`);
+    }
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…'}
+
+  const {error}=await sb.rpc('set_class_substitute_v2',{
+    p_class_id:String(classId),
+    p_substitute_user_id:authUid,
+    p_substitute_team_id:teamId
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Save substitute'}
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  if(authUid){
+    alert('Substitute assigned. The class will count under that instructor account.');
+  }else if(teamId){
+    const t=db.team.find(x=>String(x.id)===String(teamId));
+    alert(`${t?.name||'Substitute'} assigned as a one-off substitute. No app access was given.`);
+  }else{
+    alert('Substitute removed. The original instructor is back on the class.');
+  }
+}
+
+// Make display + taught-count logic recognize one-off team substitutes too.
+function instructorForClass(c){
+  const sub=(db.class_substitutions||[]).find(s=>String(s.class_id)===String(c.id)&&s.active);
+  if(sub?.substitute_instructor)return sub.substitute_instructor;
+  if(sub?.substitute_team_id)return `team:${sub.substitute_team_id}`;
+  return c.instructor_user_id||null;
+}
+
+function instructorStats(uid,month=currentYM()){
+  const teamMatch=(db.team||[]).find(t=>String(t.auth_user_id||'')===String(uid||''));
+  const teamKey=teamMatch?`team:${teamMatch.id}`:null;
+
+  const own=db.classes.filter(c=>{
+    const assigned=instructorForClass(c);
+    return String(assigned||'')===String(uid||'') || (teamKey && String(assigned||'')===teamKey);
+  });
+
+  const monthClasses=own.filter(c=>ym(c.class_date)===month&&!c.cancelled&&new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date());
+  return {
+    scheduled:monthClasses.length,
+    taught:monthClasses.filter(classWasTaught).length,
+    total:own.filter(classWasTaught).length
+  };
+}
+
+function classesTaughtCount(t){
+  if(t.auth_user_id)return instructorStats(t.auth_user_id).total;
+
+  const key=`team:${t.id}`;
+  const own=db.classes.filter(c=>String(instructorForClass(c)||'')===key);
+  return own.filter(classWasTaught).length;
+}
+
+
+// ================= CORE THEORY — SHOW SUBSTITUTE NAME ON SCHEDULE =================
+function ctActiveSubstitution(c){
+  return (db.class_substitutions||[]).find(s=>
+    String(s.class_id)===String(c.id) && s.active
+  )||null;
+}
+
+function ctDisplayedInstructor(c){
+  const sub=ctActiveSubstitution(c);
+  if(sub){
+    if(sub.substitute_name)return sub.substitute_name;
+    if(sub.substitute_instructor){
+      const t=(db.team||[]).find(x=>String(x.auth_user_id||'')===String(sub.substitute_instructor));
+      if(t?.name)return t.name;
+    }
+    if(sub.substitute_team_id){
+      const t=(db.team||[]).find(x=>String(x.id)===String(sub.substitute_team_id));
+      if(t?.name)return t.name;
+    }
+  }
+  return c.instructor||'No instructor';
+}
+
+function ctHasSubstitute(c){
+  return Boolean(ctActiveSubstitution(c));
+}
+
+// Override the class card used throughout the weekly schedule and instructor views.
+function classCard(c){
+  const n=bookingCount(c.id);
+  const instructorName=ctDisplayedInstructor(c);
+  const sub=ctHasSubstitute(c);
+
+  return `<div class="class-card" style="--level:${levelColor(c.level)}" onclick="openClass('${c.id}')">
+    <b>${esc(c.class_type||'Class')}</b>
+    <span>
+      ${esc(c.level||'Open Level')} ·
+      ${sub?`<strong>${esc(instructorName)}</strong> <small class="ct-sub-inline">Substitute</small>`:esc(instructorName)}
+    </span>
+    <small>${formatTime((c.class_time||'00:00').slice(0,5))} · ${n}/${c.capacity||0} booked</small>
+  </div>`;
+}
+
+// Patch the class detail popup after the existing openClass() renders it.
+// This keeps all existing booking/check-in controls untouched.
+const ctOriginalOpenClass = openClass;
+openClass = function(id){
+  ctOriginalOpenClass(id);
+
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c||!ctHasSubstitute(c))return;
+
+  const modalEl=document.querySelector('#modal .modal-card, #modal .modal, #modal');
+  if(!modalEl)return;
+
+  const displayed=ctDisplayedInstructor(c);
+  const original=c.instructor||'Unassigned';
+
+  const infoRows=[...modalEl.querySelectorAll('p')];
+  const firstInfo=infoRows.find(p=>p.textContent?.includes(c.studio_type||'Pilates'));
+  if(firstInfo){
+    firstInfo.innerHTML=
+      `<span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span> `+
+      `${esc(c.studio_type||'Pilates')} · <b>${esc(displayed)}</b> `+
+      `<span class="ct-sub-inline">Substitute</span>`+
+      `<small class="ct-original-note">Original: ${esc(original)}</small>`;
+  }
+};
+
+// Keep client-facing class cards consistent too.
+function ctApplyDisplayedInstructorToClientCards(){
+  document.querySelectorAll('.client-class').forEach(card=>{
+    // no-op helper reserved for future DOM refreshes
+  });
+}
+
+(function ctSubstituteDisplayStyles(){
+  if(document.getElementById('ctSubstituteDisplayStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctSubstituteDisplayStyles';
+  s.textContent=`
+    .ct-sub-inline{
+      display:inline-block;
+      margin-left:5px;
+      padding:2px 6px;
+      border-radius:999px;
+      background:rgba(114,47,55,.10);
+      color:#722F37;
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.02em;
+      vertical-align:middle;
+    }
+    .ct-original-note{
+      display:block;
+      margin-top:4px;
+      color:#6B6B6B;
+      font-size:11px;
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+
+// ================= CORE THEORY — CLIENT WEEKLY SCHEDULE NAVIGATION =================
+let clientBookWeekOffset = 0;
+
+function ctClientWeekStart(offset=0){
+  const d=new Date();
+  const day=(d.getDay()+6)%7; // Monday = 0
+  d.setHours(12,0,0,0);
+  d.setDate(d.getDate()-day+(offset*7));
+  return d;
+}
+
+function ctClientClassIsPast(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`) <= new Date();
+}
+
+function ctClientBookingClosed(c){
+  const start=new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+  return (start.getTime()-Date.now()) < 60*60*1000;
+}
+
+function ctClientClassCard(c){
+  const n=bookingCount(c.id);
+  const cap=Number(c.capacity||0);
+  const full=cap>0 && n>=cap;
+  const closed=ctClientBookingClosed(c);
+  const instructor = typeof ctDisplayedInstructor==='function'
+    ? ctDisplayedInstructor(c)
+    : (c.instructor||'');
+
+  let action='';
+  if(closed){
+    action=`<button class="btn full" disabled>Booking closed</button>`;
+  }else if(full){
+    action=`<button class="btn primary full" onclick="clientBook('${c.id}')">Join waitlist</button>`;
+  }else{
+    action=`<button class="btn primary full" onclick="clientBook('${c.id}')">Book</button>`;
+  }
+
+  return `
+    <div class="card ct-client-week-class">
+      <div class="ct-client-class-top">
+        <div>
+          <h3>${esc(c.class_type||'Class')}</h3>
+          <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+        </div>
+        ${full?'<span class="ct-full-badge">FULL</span>':''}
+      </div>
+      <p class="ct-client-class-time">${formatTime(String(c.class_time||'00:00').slice(0,5))}</p>
+      ${instructor?`<p class="muted">${esc(instructor)}</p>`:''}
+      ${action}
+    </div>`;
+}
+
+function book(){
+  const mon=ctClientWeekStart(clientBookWeekOffset);
+  const days=[];
+
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  const weekDates=new Set(days.map(dateISO));
+
+  const classes=(db.classes||[])
+    .filter(c=>
+      weekDates.has(c.class_date) &&
+      !c.cancelled &&
+      (c.studio_type||'Pilates')===studioTab &&
+      !ctClientClassIsPast(c)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  const grouped={};
+  days.forEach(d=>grouped[dateISO(d)]=[]);
+  classes.forEach(c=>(grouped[c.class_date]??=[]).push(c));
+
+  const weekLabel=
+    `${mon.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – `+
+    `${days[6].toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`;
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+    </div>
+
+    <div class="ct-client-week-nav">
+      <button class="btn" ${clientBookWeekOffset<=0?'disabled':''}
+        onclick="if(clientBookWeekOffset>0){clientBookWeekOffset--;book()}">← Previous</button>
+
+      <button class="btn" onclick="clientBookWeekOffset=0;book()">This week</button>
+
+      <button class="btn" onclick="clientBookWeekOffset++;book()">Next →</button>
+    </div>
+
+    <div class="ct-client-week-label">${esc(weekLabel)}</div>
+
+    <div class="ct-client-week-days">
+      ${days.map(d=>{
+        const key=dateISO(d);
+        const dayClasses=grouped[key]||[];
+        return `
+          <section class="ct-client-day">
+            <div class="ct-client-day-head">
+              <b>${d.toLocaleDateString(undefined,{weekday:'long'})}</b>
+              <span>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+            </div>
+            <div class="ct-client-day-classes">
+              ${dayClasses.map(ctClientClassCard).join('') || '<div class="ct-client-no-class">No classes</div>'}
+            </div>
+          </section>`;
+      }).join('')}
+    </div>
+  `,'Book a Class','Browse future weeks and reserve Pilates or Megacore classes');
+}
+
+(function ctClientWeekStyles(){
+  if(document.getElementById('ctClientWeekStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctClientWeekStyles';
+  s.textContent=`
+    .ct-client-week-nav{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin:14px 0 8px;
+    }
+
+    .ct-client-week-label{
+      margin:8px 0 14px;
+      font-weight:700;
+      color:#6B6B6B;
+    }
+
+    .ct-client-week-days{
+      display:grid;
+      grid-template-columns:repeat(7,minmax(150px,1fr));
+      gap:10px;
+      overflow-x:auto;
+      padding-bottom:8px;
+    }
+
+    .ct-client-day{
+      min-width:150px;
+    }
+
+    .ct-client-day-head{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      padding:9px 4px;
+      text-align:center;
+    }
+
+    .ct-client-day-head span{
+      font-size:12px;
+      color:#6B6B6B;
+    }
+
+    .ct-client-day-classes{
+      display:grid;
+      gap:9px;
+    }
+
+    .ct-client-week-class{
+      padding:13px !important;
+      min-height:170px;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .ct-client-week-class h3{
+      margin:0 0 7px;
+      font-size:16px;
+    }
+
+    .ct-client-class-top{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:flex-start;
+    }
+
+    .ct-client-class-time{
+      font-weight:700;
+      margin:12px 0 2px;
+    }
+
+    .ct-client-week-class .btn{
+      margin-top:auto;
+    }
+
+    .ct-full-badge{
+      padding:4px 7px;
+      border-radius:999px;
+      background:#722F37;
+      color:white;
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.07em;
+    }
+
+    .ct-client-no-class{
+      padding:18px 8px;
+      text-align:center;
+      color:#8a8a86;
+      font-size:12px;
+    }
+
+    @media(max-width:760px){
+      .ct-client-week-days{
+        display:block;
+        overflow:visible;
+      }
+
+      .ct-client-day{
+        margin-bottom:16px;
+      }
+
+      .ct-client-day-head{
+        text-align:left;
+        flex-direction:row;
+        justify-content:space-between;
+        border-bottom:1px solid rgba(0,0,0,.08);
+        margin-bottom:8px;
+      }
+
+      .ct-client-day-classes{
+        grid-template-columns:1fr;
+      }
+
+      .ct-client-week-class{
+        min-height:0;
+      }
+
+      .ct-client-week-nav{
+        display:grid;
+        grid-template-columns:1fr 1fr 1fr;
+      }
+
+      .ct-client-week-nav .btn{
+        width:100%;
+        padding-left:8px;
+        padding-right:8px;
+      }
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
+
+// ================= CORE THEORY — SUBSTITUTION OWNERSHIP + PAYROLL =================
+function teamInstructorStats(t,month=currentYM()){
+  if(!t)return {scheduled:0,taught:0,total:0};
+
+  const loginKey=t.auth_user_id?String(t.auth_user_id):null;
+  const teamKey=`team:${t.id}`;
+
+  const own=(db.classes||[]).filter(c=>{
+    if(c.cancelled)return false;
+    const assigned=instructorForClass(c);
+    return (loginKey && String(assigned||'')===loginKey) || String(assigned||'')===teamKey;
+  });
+
+  const monthClasses=own.filter(c=>
+    ym(c.class_date)===month &&
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date()
+  );
+
+  return {
+    scheduled:monthClasses.length,
+    taught:monthClasses.filter(classWasTaught).length,
+    total:own.filter(classWasTaught).length
+  };
+}
+
+function team(){
+  const month=document.getElementById('teamMonth')?.value||currentYM();
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="inviteInstructorModal()">+ Invite Instructor</button>
+        <button class="btn" onclick="teamModal()">+ Add non-login team member</button>
+        <button class="btn" onclick="autoAssignUnassignedClasses()">↻ Assign schedule from class hours</button>
+        <input type="month" id="teamMonth" value="${month}" onchange="team()">
+      </div>
+
+      <div class="warning" style="margin-bottom:14px">
+        Substituted classes count under the instructor who actually covers them. The original instructor is not paid for that class.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Class hours</th>
+            <th>This month</th>
+            <th>Scheduled</th>
+            <th>Total taught</th>
+            <th>Class rate</th>
+            <th>Est. pay</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${db.team.filter(t=>!t.archived_at).map(t=>{
+            const instructor=String(t.role||'').toLowerCase()==='instructor';
+            const s=instructor?teamInstructorStats(t,month):{taught:0,scheduled:0,total:0};
+            const rate=Number(t.class_rate||0);
+
+            return `
+              <tr>
+                <td>
+                  <b>${esc(t.name)}</b>
+                  <div class="muted">${esc(t.email||'')}</div>
+                </td>
+                <td>${esc(t.role||'')}</td>
+                <td>${instructor?ctInstructorSlotSummary(t):'<span class="muted">—</span>'}</td>
+                <td>${instructor?`<b>${s.taught}</b>`:'—'}</td>
+                <td>${instructor?s.scheduled:'—'}</td>
+                <td>${instructor?s.total:'—'}</td>
+                <td>${instructor?money(rate):'—'}</td>
+                <td>${instructor?`<b>${money(s.taught*rate)}</b>`:'—'}</td>
+                <td>
+                  <button class="btn small" onclick="editTeamMember('${t.id}')">Edit</button>
+                  ${instructor?` <button class="btn small" onclick="instructorSlotsModal('${t.id}')">Class hours</button>`:''}
+                  ${instructor?` <button class="btn small" onclick="payrollModal('${t.id}')">Payroll</button>`:''}
+                  ${t.auth_user_id?`
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',true)">Front Desk today</button>
+                    <button class="btn small" onclick="setFrontDeskDuty('${t.auth_user_id}',false)">End duty</button>
+                  `:''}
+                  ${!t.auth_user_id?` <button class="btn small danger" onclick="archiveRecord('team','${t.id}')">Archive</button>`:''}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`,
+    'Team',
+    'Exact class-hour coverage, substitutions, teaching and payroll'
+  );
+}
+
+function payrollModal(teamId){
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  if(!t)return;
+
+  const m=currentYM();
+  const s=teamInstructorStats(t,m);
+  const adjs=(db.payroll_adjustments||[]).filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m);
+  const adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0);
+  const base=s.taught*Number(t.class_rate||0);
+
+  modal(`${esc(t.name)} payroll`,`
+    <label>Month</label>
+    <input id="payMonth" type="month" value="${m}" onchange="payrollMonthRefresh('${teamId}')">
+
+    <div id="payrollBody">
+      <div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div>
+      <div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div>
+      <div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div>
+      <div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div>
+      <div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>
+    </div>
+
+    <p class="muted">A substituted class is paid to the substitute only if it meets the taught-class rule.</p>
+
+    <h3>Add adjustment</h3>
+    <label>Amount (+ or -)</label>
+    <input id="payAdj" type="number" step=".01">
+    <label>Reason</label>
+    <input id="payReason">
+    <button class="btn primary full" onclick="addPayrollAdjustment('${teamId}')">Add adjustment</button>
+  `);
+}
+
+async function payrollMonthRefresh(teamId){
+  const m=$("#payMonth").value;
+  const t=db.team.find(x=>String(x.id)===String(teamId));
+  const s=teamInstructorStats(t,m);
+  const adjs=(db.payroll_adjustments||[]).filter(a=>String(a.team_id)===String(teamId)&&a.pay_month===m);
+  const adj=adjs.reduce((a,x)=>a+Number(x.amount||0),0);
+  const base=s.taught*Number(t.class_rate||0);
+
+  $("#payrollBody").innerHTML=`
+    <div class="cart-row"><span>Classes taught</span><b>${s.taught}</b></div>
+    <div class="cart-row"><span>Rate / class</span><b>${money(t.class_rate||0)}</b></div>
+    <div class="cart-row"><span>Base pay</span><b>${money(base)}</b></div>
+    <div class="cart-row"><span>Adjustments</span><b>${money(adj)}</b></div>
+    <div class="cart-row"><span><b>Estimated total</b></span><b>${money(base+adj)}</b></div>`;
+}
+
+
+// ================= CORE THEORY — PASTE SCHEDULE BUILDER =================
+
+function ctNormalizeLevel(raw=''){
+  const v=String(raw).trim().toLowerCase();
+
+  const aliases={
+    'beginner':'Beginner',
+    'open level':'Open Level',
+    'intermediate':'Intermediate',
+    'advanced':'Advanced'
+  };
+
+  const direct=aliases[v];
+  if(direct)return direct;
+
+  const match=(db.class_levels||[]).find(x=>String(x.name||'').toLowerCase()===v);
+  return match?.name || String(raw).trim();
+}
+
+function ctNormalizeStudio(raw=''){
+  const v=String(raw).trim().toLowerCase();
+  if(['pilates','p','reformer'].includes(v))return 'Pilates';
+  if(['megacore','mega','m','lagree'].includes(v))return 'Megacore';
+  return '';
+}
+
+function ctParseTime(raw=''){
+  let v=String(raw).trim().toLowerCase().replace(/\s+/g,'');
+
+  const ampm=v.match(/^(1[0-2]|0?[1-9])(?::([0-5]\d))?(am|pm)$/);
+  if(ampm){
+    let h=Number(ampm[1]);
+    const m=Number(ampm[2]||0);
+    if(ampm[3]==='pm'&&h!==12)h+=12;
+    if(ampm[3]==='am'&&h===12)h=0;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  const hhmm=v.match(/^([01]?\d|2[0-3])(?::([0-5]\d))?$/);
+  if(hhmm){
+    const h=Number(hhmm[1]);
+    const m=Number(hhmm[2]||0);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  return '';
+}
+
+function ctDayName(raw=''){
+  const v=String(raw).trim().toLowerCase().replace(':','');
+  const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const aliases={
+    sun:'Sunday',sunday:'Sunday',
+    mon:'Monday',monday:'Monday',
+    tue:'Tuesday',tues:'Tuesday',tuesday:'Tuesday',
+    wed:'Wednesday',wednesday:'Wednesday',
+    thu:'Thursday',thur:'Thursday',thurs:'Thursday',thursday:'Thursday',
+    fri:'Friday',friday:'Friday',
+    sat:'Saturday',saturday:'Saturday'
+  };
+  return aliases[v]||days.find(d=>d.toLowerCase()===v)||'';
+}
+
+function ctUpcomingDateForDay(dayName, weekOffset=0){
+  const dayIndex=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(dayName);
+  if(dayIndex<0)return '';
+
+  const mon=mondayOfWeek(weekOffset);
+  const mondayBased=(dayIndex+6)%7;
+
+  const d=new Date(mon);
+  d.setDate(mon.getDate()+mondayBased);
+  return dateISO(d);
+}
+
+function ctFindInstructorByName(name=''){
+  const n=String(name).trim().toLowerCase();
+  if(!n)return null;
+
+  const active=(db.team||[]).filter(t=>t.role==='Instructor'&&!t.archived_at);
+
+  let exact=active.find(t=>String(t.name||'').trim().toLowerCase()===n);
+  if(exact)return exact;
+
+  // Allow first-name-only if unique.
+  const first=active.filter(t=>String(t.name||'').trim().toLowerCase().split(/\s+/)[0]===n);
+  return first.length===1?first[0]:null;
+}
+
+function ctTrySplitScheduleLine(line){
+  const raw=String(line||'').trim();
+  if(!raw)return null;
+
+  const tokens=raw.split(/\s+/);
+  if(tokens.length<3)return null;
+
+  // first token must be time
+  const time=ctParseTime(tokens[0]);
+  if(!time)return null;
+
+  // second token must be studio
+  const studio=ctNormalizeStudio(tokens[1]);
+  if(!studio)return null;
+
+  let rest=tokens.slice(2);
+
+  // Try to detect instructor from the end (exact full name first, then unique first name).
+  let instructor=null;
+  let instructorTokenCount=0;
+
+  const instructors=(db.team||[]).filter(t=>t.role==='Instructor'&&!t.archived_at);
+  const restJoined=rest.join(' ');
+
+  const candidates=instructors
+    .map(t=>({t,name:String(t.name||'').trim()}))
+    .filter(x=>x.name)
+    .sort((a,b)=>b.name.length-a.name.length);
+
+  for(const x of candidates){
+    if(restJoined.toLowerCase().endsWith(x.name.toLowerCase())){
+      instructor=x.t;
+      instructorTokenCount=x.name.split(/\s+/).length;
+      break;
+    }
+  }
+
+  if(!instructor && rest.length){
+    const possible=ctFindInstructorByName(rest[rest.length-1]);
+    if(possible){
+      instructor=possible;
+      instructorTokenCount=1;
+    }
+  }
+
+  if(instructorTokenCount){
+    rest=rest.slice(0,-instructorTokenCount);
+  }
+
+  // Detect level from the end.
+  let level='';
+  let levelTokenCount=0;
+
+  const possibleTwo=rest.slice(-2).join(' ');
+  const possibleOne=rest.slice(-1).join(' ');
+
+  const normalizedTwo=ctNormalizeLevel(possibleTwo);
+  const normalizedOne=ctNormalizeLevel(possibleOne);
+
+  const knownLevels=(db.class_levels||[]).map(x=>String(x.name||'').toLowerCase());
+
+  if(possibleTwo && (
+      ['open level'].includes(possibleTwo.toLowerCase()) ||
+      knownLevels.includes(normalizedTwo.toLowerCase())
+    )){
+    level=normalizedTwo;
+    levelTokenCount=2;
+  }else if(possibleOne){
+    const fullLevelNames=['beginner','intermediate','advanced'];
+    if(fullLevelNames.includes(possibleOne.toLowerCase()) || knownLevels.includes(normalizedOne.toLowerCase())){
+      level=normalizedOne;
+      levelTokenCount=1;
+    }
+  }
+
+  if(levelTokenCount){
+    rest=rest.slice(0,-levelTokenCount);
+  }
+
+  const className=rest.join(' ').trim();
+
+  if(!className)return null;
+
+  return {
+    time,
+    studio,
+    class_type:className,
+    level:level||'Open Level',
+    instructor_name:instructor?.name||'',
+    instructor_user_id:instructor?.auth_user_id||null,
+    instructor_team_id:instructor?.id||null
+  };
+}
+
+function ctParsePastedSchedule(text, weekOffset=0){
+  const lines=String(text||'').split(/\r?\n/);
+  const rows=[];
+  const errors=[];
+  let currentDay='';
+
+  lines.forEach((line,idx)=>{
+    const trimmed=line.trim();
+    if(!trimmed)return;
+
+    const maybeDay=ctDayName(trimmed);
+    if(maybeDay){
+      currentDay=maybeDay;
+      return;
+    }
+
+    if(!currentDay){
+      errors.push(`Line ${idx+1}: add a day heading before "${trimmed}"`);
+      return;
+    }
+
+    const parsed=ctTrySplitScheduleLine(trimmed);
+    if(!parsed){
+      errors.push(`Line ${idx+1}: couldn't understand "${trimmed}"`);
+      return;
+    }
+
+    rows.push({
+      ...parsed,
+      day:currentDay,
+      class_date:ctUpcomingDateForDay(currentDay,weekOffset)
+    });
+  });
+
+  return {rows,errors};
+}
+
+let ctPasteScheduleRows=[];
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1">Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="16" placeholder="Monday
+8 Pilates Rise & Shine Open Level Vanessa
+9 Pilates Rise & Shine Open Level Vanessa
+10 Pilates Peach Please Intermediate Lea
+
+Tuesday
+4 Megacore Dynamic Intermediate Vanessa
+5 Megacore Dynamic Intermediate Vanessa"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Use full level names only: Beginner · Open Level · Intermediate · Advanced.
+          Instructor is optional.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows;
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Class</th>
+            <th>Level</th>
+            <th>Instructor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${parsed.rows.length} Classes</button>
+    </div>
+  `);
+}
+
+function removePastedScheduleRow(i){
+  ctPasteScheduleRows.splice(i,1);
+
+  if(!ctPasteScheduleRows.length){
+    return pasteScheduleModal();
+  }
+
+  const rowsHtml=ctPasteScheduleRows.map((r,idx)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${idx})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const body=$("#ctPastePreviewBody");
+  if(body)body.innerHTML=rowsHtml;
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const payload=ctPasteScheduleRows.map(r=>({
+    class_date:r.class_date,
+    class_time:r.time,
+    class_type:r.class_type,
+    instructor:r.instructor_name||'',
+    instructor_user_id:r.instructor_user_id||null,
+    capacity:10,
+    studio_type:r.studio,
+    level:r.level,
+    recurring_group:null
+  }));
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  // If instructor was left blank, apply existing exact Class Hours assignment rules.
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(`${payload.length} classes created.`);
+  page='schedule';
+  render();
+}
+
+
+// Override Owner schedule toolbar to add Paste Schedule.
+function schedule(){
+  const mon=mondayOfWeek(scheduleWeekOffset),days=[];
+  for(let i=0;i<6;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';schedule()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';schedule()">MEGACORE</button>
+    </div>
+
+    <div class="schedule-tools">
+      <div class="toolbar">
+        ${isOwner()?`
+          <button class="btn primary" onclick="classModal()">+ Add class</button>
+          <button class="btn" onclick="pasteScheduleModal()">Paste Schedule</button>
+        `:''}
+
+        <button class="btn" onclick="scheduleWeekOffset--;schedule()">← Previous</button>
+        <button class="btn" onclick="scheduleWeekOffset=0;schedule()">This week</button>
+        <button class="btn" onclick="scheduleWeekOffset++;schedule()">Next →</button>
+      </div>
+    </div>
+
+    ${scheduleTable(days,studioTab)}
+  `,
+  'Schedule',
+  `${studioTab} weekly timetable — same times stay on the same row`);
+}
+
+
+// ================= CORE THEORY — PASTE SCHEDULE REPEAT WEEKLY =================
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1">Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12">Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="16" placeholder="Monday
+8 Pilates Rise & Shine Open Level Vanessa
+9 Pilates Rise & Shine Open Level Vanessa
+10 Pilates Peach Please Intermediate Lea
+
+Tuesday
+4 Megacore Dynamic Intermediate Vanessa
+5 Megacore Dynamic Intermediate Vanessa"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Use full level names only: Beginner · Open Level · Intermediate · Advanced.
+          Instructor is optional.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.instructor_name||'Auto / Unassigned')}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  const total=parsed.rows.length*repeatWeeks;
+  const repeatCopy=repeatWeeks===1
+    ? 'This schedule will be created once.'
+    : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`;
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatCopy}<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Class</th>
+            <th>Level</th>
+            <th>Instructor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const repeatWeeks=Number(ctPasteScheduleRows[0]?.repeat_weeks||1);
+  const recurringGroup=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  ctPasteScheduleRows.forEach(r=>{
+    const base=new Date(`${r.class_date}T12:00:00`);
+
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+(w*7));
+
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.time,
+        class_type:r.class_type,
+        instructor:r.instructor_name||'',
+        instructor_user_id:r.instructor_user_id||null,
+        capacity:10,
+        studio_type:r.studio,
+        level:r.level,
+        recurring_group:recurringGroup
+      });
+    }
+  });
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(
+    repeatWeeks===1
+      ? `${payload.length} classes created.`
+      : `${payload.length} classes created across ${repeatWeeks} weeks.`
+  );
+
+  page='schedule';
+  render();
+}
+
+
+// ================= CORE THEORY — CANCEL REPEATED CLASS SERIES =================
+
+function ctSameRecurringSlot(base, other){
+  if(!base || !other || !base.recurring_group || !other.recurring_group)return false;
+  if(String(base.recurring_group)!==String(other.recurring_group))return false;
+
+  const baseDay=new Date(`${base.class_date}T12:00:00`).getDay();
+  const otherDay=new Date(`${other.class_date}T12:00:00`).getDay();
+
+  return (
+    baseDay===otherDay &&
+    String(base.class_time||'').slice(0,5)===String(other.class_time||'').slice(0,5) &&
+    String(base.studio_type||'Pilates')===String(other.studio_type||'Pilates') &&
+    String(base.class_type||'').trim().toLowerCase()===String(other.class_type||'').trim().toLowerCase()
+  );
+}
+
+function deleteClass(id){
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  if(!c.recurring_group){
+    return ctCancelOneClass(id);
+  }
+
+  const futureSeries=(db.classes||[])
+    .filter(x=>
+      !x.cancelled &&
+      ctSameRecurringSlot(c,x) &&
+      String(x.class_date)>=String(c.class_date)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(futureSeries.length<=1){
+    return ctCancelOneClass(id);
+  }
+
+  modal('Cancel repeated class',`
+    <div class="card">
+      <h3>${esc(c.class_type||'Class')}</h3>
+      <p>
+        ${new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}
+        · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+        · ${esc(c.studio_type||'Pilates')}
+      </p>
+      <p class="muted">
+        This class repeats weekly. Choose whether to cancel only this date or this class on all future weeks.
+      </p>
+    </div>
+
+    <div style="display:grid;gap:10px;margin-top:14px">
+      <button class="btn" onclick="ctCancelOneClass('${c.id}')">
+        Cancel this class only
+      </button>
+
+      <button class="btn danger" onclick="ctCancelFutureSeries('${c.id}')">
+        Cancel this + ${futureSeries.length-1} future week${futureSeries.length-1===1?'':'s'}
+      </button>
+
+      <button class="btn" onclick="$('#modal').remove()">Keep class</button>
+    </div>
+  `);
+}
+
+async function ctCancelOneClass(id){
+  if(!confirm('Cancel only this class? Existing bookings will be cancelled safely.'))return;
+
+  const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(id)});
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert('This class was cancelled.');
+}
+
+async function ctCancelFutureSeries(id){
+  const base=db.classes.find(x=>String(x.id)===String(id));
+  if(!base)return;
+
+  const series=(db.classes||[])
+    .filter(x=>
+      !x.cancelled &&
+      ctSameRecurringSlot(base,x) &&
+      String(x.class_date)>=String(base.class_date)
+    )
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(!series.length)return alert('No future repeated classes found.');
+
+  const ok=confirm(
+    `Cancel ${series.length} ${base.class_type||'class'} session${series.length===1?'':'s'} from ${base.class_date} onward?\n\n`+
+    `Any existing bookings on those classes will be cancelled safely.`
+  );
+  if(!ok)return;
+
+  const btn=document.querySelector('#modal .btn.danger');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Cancelling…';
+  }
+
+  let cancelled=0;
+
+  for(const c of series){
+    const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(c.id)});
+    if(error){
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='Try again';
+      }
+      await loadAll();
+      return alert(`${cancelled} classes were cancelled, then Core Theory stopped because of an error:\n${error.message}`);
+    }
+    cancelled++;
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  alert(`${cancelled} repeated classes were cancelled.`);
+}
+
+
+// ================= CORE THEORY — HIDE CANCELLED CLASSES COMPLETELY =================
+
+// Cancelled classes should remain in the database for booking/history safety,
+// but must disappear completely from every timetable/schedule view.
+function scheduleTable(days,type){
+  const dates=new Set(days.map(dateISO));
+
+  const cs=(db.classes||[]).filter(c=>
+    dates.has(c.class_date) &&
+    !c.cancelled &&
+    (c.studio_type||'Pilates')===type
+  );
+
+  const times=[...new Set(
+    cs.map(c=>(c.class_time||'').slice(0,5)).filter(Boolean)
+  )].sort();
+
+  if(!times.length){
+    for(let h=7;h<=20;h++){
+      times.push(String(h).padStart(2,'0')+':00');
+    }
+  }
+
+  return `
+    <div class="card schedule-wrap">
+      <table class="weekly-schedule">
+        <thead>
+          <tr>
+            <th class="time-col">Time</th>
+            ${days.map(d=>`
+              <th>
+                ${d.toLocaleDateString(undefined,{weekday:'long'})}
+                <small>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</small>
+              </th>
+            `).join('')}
+          </tr>
+        </thead>
+
+        <tbody>
+          ${times.map(t=>`
+            <tr>
+              <th class="time-col">${formatTime(t)}</th>
+              ${days.map(d=>`
+                <td class="schedule-cell">
+                  ${cs
+                    .filter(c=>
+                      c.class_date===dateISO(d) &&
+                      (c.class_time||'').slice(0,5)===t
+                    )
+                    .map(classCard)
+                    .join('')
+                  }
+                </td>
+              `).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// Also make sure other schedule-facing lists never show cancelled classes.
+function ctVisibleScheduleClasses(list=[]){
+  return (list||[]).filter(c=>!c.cancelled);
+}
+
+
+
+// ================= CORE THEORY — PASTE SCHEDULE PIPE FORMAT =================
+// Expected format:
+// Monday
+// 8 AM | Pilates | Open Level | By the Book | Vanessa | 5
+
+function ctParsePipeScheduleLine(line){
+  const parts=String(line||'').split('|').map(x=>x.trim());
+  if(parts.length!==6)return {error:'Use: Time | Studio | Level | Class Name | Instructor | Capacity'};
+
+  const [timeRaw,studioRaw,levelRaw,classNameRaw,instructorRaw,capacityRaw]=parts;
+
+  const time=ctParseTime(timeRaw);
+  if(!time)return {error:`Invalid time "${timeRaw}"`};
+
+  const studio=ctNormalizeStudio(studioRaw);
+  if(!studio)return {error:`Studio must be Pilates or Megacore`};
+
+  const level=ctNormalizeLevel(levelRaw);
+  const configuredLevel=(db.class_levels||[]).find(
+    x=>String(x.name||'').trim().toLowerCase()===String(level||'').trim().toLowerCase()
+  );
+  if(!configuredLevel)return {error:`Level "${levelRaw}" is not configured`};
+
+  const className=String(classNameRaw||'').trim();
+  if(!className)return {error:'Class name is missing'};
+
+  const instructorName=String(instructorRaw||'').trim();
+  let instructor=null;
+  if(instructorName && instructorName.toLowerCase()!=='unassigned'){
+    instructor=ctFindInstructorByName(instructorName);
+    if(!instructor)return {error:`Instructor "${instructorName}" was not found exactly once in Team`};
+  }
+
+  const capacity=Number(capacityRaw);
+  if(!Number.isInteger(capacity)||capacity<1)return {error:'Capacity must be a whole number greater than 0'};
+
+  return {
+    row:{
+      time,
+      studio,
+      level:configuredLevel.name,
+      class_type:className,
+      instructor_name:instructor?.name||'',
+      instructor_user_id:instructor?.auth_user_id||null,
+      instructor_team_id:instructor?.id||null,
+      capacity
+    }
+  };
+}
+
+function ctParsePastedSchedule(text, weekOffset=0){
+  const lines=String(text||'').split(/\r?\n/);
+  const rows=[];
+  const errors=[];
+  let currentDay='';
+
+  lines.forEach((line,idx)=>{
+    const trimmed=line.trim();
+    if(!trimmed)return;
+
+    const maybeDay=ctDayName(trimmed);
+    if(maybeDay){
+      currentDay=maybeDay;
+      return;
+    }
+
+    if(!currentDay){
+      errors.push(`Line ${idx+1}: add a day heading before "${trimmed}"`);
+      return;
+    }
+
+    const parsed=ctParsePipeScheduleLine(trimmed);
+    if(parsed.error){
+      errors.push(`Line ${idx+1}: ${parsed.error}`);
+      return;
+    }
+
+    rows.push({
+      ...parsed.row,
+      day:currentDay,
+      class_date:ctUpcomingDateForDay(currentDay,weekOffset)
+    });
+  });
+
+  return {rows,errors};
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="22" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | Vanessa | 5
+9 AM | Pilates | Beginner | By the Book | Vanessa | 5
+10 AM | Pilates | Open Level | Cheeky Business | Vanessa | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | Vanessa | 5
+9 AM | Pilates | Open Level | Cheeky Business | Vanessa | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Format: <b>Time | Studio | Level | Class Name | Instructor | Capacity</b><br>
+          Put only the weekday on its own line: Monday, Tuesday, Wednesday, etc.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.instructor_name||'Unassigned')}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  const total=parsed.rows.length*repeatWeeks;
+  const repeatCopy=repeatWeeks===1
+    ? 'This schedule will be created once.'
+    : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`;
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatCopy}<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Level</th>
+            <th>Class</th>
+            <th>Instructor</th>
+            <th>Capacity</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+function removePastedScheduleRow(i){
+  ctPasteScheduleRows.splice(i,1);
+
+  if(!ctPasteScheduleRows.length)return pasteScheduleModal();
+
+  const rowsHtml=ctPasteScheduleRows.map((r,idx)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${esc(r.instructor_name||'Unassigned')}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${idx})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const body=$("#ctPastePreviewBody");
+  if(body)body.innerHTML=rowsHtml;
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const repeatWeeks=Number(ctPasteScheduleRows[0]?.repeat_weeks||1);
+  const scheduleGroup=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  ctPasteScheduleRows.forEach(r=>{
+    const base=new Date(`${r.class_date}T12:00:00`);
+
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+(w*7));
+
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.time,
+        class_type:r.class_type,
+        instructor:r.instructor_name||'',
+        instructor_user_id:r.instructor_user_id||null,
+        capacity:r.capacity,
+        studio_type:r.studio,
+        level:r.level,
+        recurring_group:scheduleGroup
+      });
+    }
+  });
+
+  const duplicate=payload.find(r=>(db.classes||[]).some(c=>
+    !c.cancelled &&
+    c.class_date===r.class_date &&
+    String(c.class_time||'').slice(0,5)===String(r.class_time||'').slice(0,5) &&
+    String(c.studio_type||'Pilates')===String(r.studio_type||'Pilates')
+  ));
+
+  if(duplicate){
+    return alert(
+      `Nothing was created because there is already a ${duplicate.studio_type} class on `+
+      `${duplicate.class_date} at ${formatTime(String(duplicate.class_time).slice(0,5))}.`
+    );
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(
+    repeatWeeks===1
+      ? `${payload.length} classes created.`
+      : `${payload.length} classes created across ${repeatWeeks} weeks.`
+  );
+
+  page='schedule';
+  render();
+}
+
+
+
+// ================= CORE THEORY — PASTE SCHEDULE WITHOUT INSTRUCTOR =================
+// New expected format:
+// Monday
+// 8 AM | Pilates | Open Level | By the Book | 5
+
+function ctParsePipeScheduleLine(line){
+  const parts=String(line||'').split('|').map(x=>x.trim());
+  if(parts.length!==5)return {error:'Use: Time | Studio | Level | Class Name | Capacity'};
+
+  const [timeRaw,studioRaw,levelRaw,classNameRaw,capacityRaw]=parts;
+
+  const time=ctParseTime(timeRaw);
+  if(!time)return {error:`Invalid time "${timeRaw}"`};
+
+  const studio=ctNormalizeStudio(studioRaw);
+  if(!studio)return {error:'Studio must be Pilates or Megacore'};
+
+  const level=ctNormalizeLevel(levelRaw);
+  const configuredLevel=(db.class_levels||[]).find(
+    x=>String(x.name||'').trim().toLowerCase()===String(level||'').trim().toLowerCase()
+  );
+  if(!configuredLevel)return {error:`Level "${levelRaw}" is not configured`};
+
+  const className=String(classNameRaw||'').trim();
+  if(!className)return {error:'Class name is missing'};
+
+  const capacity=Number(capacityRaw);
+  if(!Number.isInteger(capacity)||capacity<1)return {error:'Capacity must be a whole number greater than 0'};
+
+  return {
+    row:{
+      time,
+      studio,
+      level:configuredLevel.name,
+      class_type:className,
+      instructor_name:'',
+      instructor_user_id:null,
+      instructor_team_id:null,
+      capacity
+    }
+  };
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="22" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | 5
+9 AM | Pilates | Beginner | By the Book | 5
+10 AM | Pilates | Open Level | Cheeky Business | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | 5
+9 AM | Pilates | Open Level | Cheeky Business | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Format: <b>Time | Studio | Level | Class Name | Capacity</b><br>
+          Instructor is not included here. Core Theory can assign instructors separately using Class Hours.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(!parsed.rows.length){
+    return alert(parsed.errors[0]||'No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const warning=parsed.errors.length
+    ? `<div class="warning" style="margin-bottom:12px"><b>${parsed.errors.length} line(s) need attention:</b><br>${parsed.errors.map(esc).join('<br>')}</div>`
+    : '';
+
+  const total=parsed.rows.length*repeatWeeks;
+  const repeatCopy=repeatWeeks===1
+    ? 'This schedule will be created once.'
+    : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`;
+
+  modal('Preview Schedule',`
+    ${warning}
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatCopy}<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Level</th>
+            <th>Class</th>
+            <th>Capacity</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+function removePastedScheduleRow(i){
+  ctPasteScheduleRows.splice(i,1);
+
+  if(!ctPasteScheduleRows.length)return pasteScheduleModal();
+
+  const rowsHtml=ctPasteScheduleRows.map((r,idx)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${idx})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const body=$("#ctPastePreviewBody");
+  if(body)body.innerHTML=rowsHtml;
+}
+
+
+
+// ================= CORE THEORY — PASTE SCHEDULE DISPLAY FIX =================
+
+let ctPasteStartWeekOffset = 1;
+
+// Keep the normal Add Class modal simple so there is only ONE paste tool.
+function classModal(){
+  modal('Add class',classForm());
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="22" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | 5
+9 AM | Pilates | Beginner | By the Book | 5
+10 AM | Pilates | Open Level | Cheeky Business | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | 5
+9 AM | Pilates | Open Level | Cheeky Business | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Format: <b>Time | Studio | Level | Class Name | Capacity</b><br>
+          No instructor name is needed.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  ctPasteStartWeekOffset=weekOffset;
+
+  const parsed=ctParsePastedSchedule(text,weekOffset);
+  ctPasteScheduleRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  if(parsed.errors.length){
+    return alert('Nothing was created. Fix these lines first:\n\n'+parsed.errors.join('\n'));
+  }
+
+  if(!parsed.rows.length){
+    return alert('No classes found.');
+  }
+
+  const rowsHtml=parsed.rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.day)}</td>
+      <td>${esc(r.class_date)}</td>
+      <td>${formatTime(r.time)}</td>
+      <td>${esc(r.studio)}</td>
+      <td>${esc(r.level)}</td>
+      <td>${esc(r.class_type)}</td>
+      <td>${r.capacity}</td>
+      <td><button class="btn small danger" onclick="removePastedScheduleRow(${i})">Remove</button></td>
+    </tr>
+  `).join('');
+
+  const total=parsed.rows.length*repeatWeeks;
+
+  modal('Preview Schedule',`
+    <div class="notice card" style="margin-bottom:12px">
+      ${repeatWeeks===1
+        ? 'This schedule will be created once.'
+        : `This schedule will repeat every week for <b>${repeatWeeks} weeks</b>.`
+      }<br>
+      <b>${total} total class${total===1?'':'es'}</b> will be created.
+    </div>
+
+    <div class="card" style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>First date</th>
+            <th>Time</th>
+            <th>Studio</th>
+            <th>Level</th>
+            <th>Class</th>
+            <th>Capacity</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ctPastePreviewBody">${rowsHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" onclick="savePastedSchedule()">Create ${total} Classes</button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ctPasteScheduleRows.length)return alert('Nothing to create.');
+
+  const repeatWeeks=Number(ctPasteScheduleRows[0]?.repeat_weeks||1);
+  const scheduleGroup=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  ctPasteScheduleRows.forEach(r=>{
+    const base=new Date(`${r.class_date}T12:00:00`);
+
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+(w*7));
+
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.time,
+        class_type:r.class_type,
+        instructor:'',
+        instructor_user_id:null,
+        capacity:r.capacity,
+        studio_type:r.studio,
+        level:r.level,
+        recurring_group:scheduleGroup
+      });
+    }
+  });
+
+  // Block accidental duplicate timetable inserts.
+  const duplicate=payload.find(r=>(db.classes||[]).some(c=>
+    !c.cancelled &&
+    c.class_date===r.class_date &&
+    String(c.class_time||'').slice(0,5)===String(r.class_time||'').slice(0,5) &&
+    String(c.studio_type||'Pilates')===String(r.studio_type||'Pilates')
+  ));
+
+  if(duplicate){
+    return alert(
+      `There is already a ${duplicate.studio_type} class on ${duplicate.class_date} at `+
+      `${formatTime(String(duplicate.class_time).slice(0,5))}.\n\n`+
+      `Nothing was added so the schedule is not duplicated.`
+    );
+  }
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Creating…';
+  }
+
+  const {error}=await sb.from('classes').insert(payload);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=`Create ${payload.length} Classes`;
+    }
+    return alert(error.message);
+  }
+
+  // Use existing Class Hours rules for instructor assignment.
+  try{
+    await sb.rpc('auto_assign_classes_from_slots');
+  }catch(e){}
+
+  ctPasteScheduleRows=[];
+  $("#modal")?.remove();
+
+  await loadAll();
+
+  // IMPORTANT: automatically open the week where the pasted timetable starts.
+  scheduleWeekOffset=ctPasteStartWeekOffset;
+  studioTab='Pilates';
+  page='schedule';
+  schedule();
+
+  alert(
+    repeatWeeks===1
+      ? `${payload.length} classes created. You are now viewing the week they were added to.`
+      : `${payload.length} classes created across ${repeatWeeks} weeks. You are now viewing the first week.`
+  );
+}
+
+
+
+// ================= CORE THEORY — CLEAR WHOLE FUTURE SCHEDULE =================
+
+function clearScheduleModal(){
+  const future=(db.classes||[])
+    .filter(c=>!c.cancelled && String(c.class_date)>=today())
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal('Clear Schedule',`
+    <div class="warning" style="margin-bottom:14px">
+      <b>This will remove every upcoming class from the schedule.</b>
+      <p style="margin:8px 0 0">
+        Past classes are kept for attendance, history and payroll.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="cart-row">
+        <span>Upcoming classes to remove</span>
+        <b>${future.length}</b>
+      </div>
+    </div>
+
+    <div style="display:grid;gap:10px;margin-top:14px">
+      <button class="btn danger" onclick="clearWholeFutureSchedule()">
+        Clear Entire Future Schedule
+      </button>
+      <button class="btn" onclick="$('#modal').remove()">Keep Schedule</button>
+    </div>
+  `);
+}
+
+async function clearWholeFutureSchedule(){
+  if(!isOwner())return;
+
+  const future=(db.classes||[])
+    .filter(c=>!c.cancelled && String(c.class_date)>=today())
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  if(!future.length){
+    $("#modal")?.remove();
+    return alert('There are no upcoming classes to clear.');
+  }
+
+  const firstConfirm=confirm(
+    `Clear ALL ${future.length} upcoming classes from the schedule?\n\n`+
+    `This includes Pilates and Megacore classes from today onward.`
+  );
+  if(!firstConfirm)return;
+
+  const typed=prompt('Type CLEAR to confirm deleting the whole future schedule:');
+  if(String(typed||'').trim().toUpperCase()!=='CLEAR'){
+    return alert('Schedule was not cleared.');
+  }
+
+  const btn=document.querySelector('#modal .btn.danger');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Clearing schedule…';
+  }
+
+  let removed=0;
+
+  for(const c of future){
+    const {error}=await sb.rpc('cancel_class_safely',{p_class_id:String(c.id)});
+    if(error){
+      await loadAll();
+
+      if(btn){
+        btn.disabled=false;
+        btn.textContent='Clear Entire Future Schedule';
+      }
+
+      return alert(
+        `${removed} classes were removed before Core Theory stopped because of an error:\n${error.message}`
+      );
+    }
+    removed++;
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  scheduleWeekOffset=0;
+  page='schedule';
+  schedule();
+
+  alert(`${removed} upcoming classes were removed from the schedule.`);
+}
+
+
+// Latest Schedule toolbar — includes Paste Schedule + Clear Schedule.
+function schedule(){
+  const mon=mondayOfWeek(scheduleWeekOffset),days=[];
+
+  for(let i=0;i<6;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';schedule()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';schedule()">MEGACORE</button>
+    </div>
+
+    <div class="schedule-tools">
+      <div class="toolbar">
+        ${isOwner()?`
+          <button class="btn primary" onclick="classModal()">+ Add class</button>
+          <button class="btn" onclick="pasteScheduleModal()">Paste Schedule</button>
+          <button class="btn danger" onclick="clearScheduleModal()">Clear Schedule</button>
+        `:''}
+
+        <button class="btn" onclick="scheduleWeekOffset--;schedule()">← Previous</button>
+        <button class="btn" onclick="scheduleWeekOffset=0;schedule()">This week</button>
+        <button class="btn" onclick="scheduleWeekOffset++;schedule()">Next →</button>
+      </div>
+    </div>
+
+    ${scheduleTable(days,studioTab)}
+  `,
+  'Schedule',
+  `${studioTab} weekly timetable — same times stay on the same row`);
+}
+
+
+
+// ================= CORE THEORY — LOAD MORE THAN 1000 ROWS =================
+// Supabase/PostgREST commonly returns at most 1000 rows per select request.
+// Fetch tables in pages so long schedules are not cut off.
+
+async function ctFetchAllRows(table, pageSize=1000){
+  let all=[];
+  let from=0;
+
+  while(true){
+    const to=from+pageSize-1;
+    const {data,error}=await sb.from(table).select("*").range(from,to);
+
+    if(error)return {data:null,error};
+
+    const rows=data||[];
+    all.push(...rows);
+
+    if(rows.length<pageSize)break;
+    from+=pageSize;
+  }
+
+  return {data:all,error:null};
+}
+
+async function loadAll(){
+  if(!session)return authScreen();
+
+  $("#app").innerHTML='<div class="loading">Loading Core Theory…</div>';
+
+  let pr=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();
+  if(pr.error)return authScreen("Profile error: "+pr.error.message);
+
+  profile=pr.data;
+  if(!profile)return authScreen("This account does not have a Core Theory profile yet.");
+
+  if(isClient()){
+    await sb.rpc("ensure_client_record");
+    await sb.rpc("issue_my_birthday_reward");
+  }
+
+  if(isOwner()){
+    await sb.rpc('process_today_birthdays');
+  }
+
+  const tables=isOwner()
+    ?[
+      'clients','memberships','products','sales','expenses','classes','team','bookings',
+      'class_levels','package_orders','notification_settings','notification_queue',
+      'studio_settings','announcements','promo_codes','custom_sections','custom_entries',
+      'audit_log','instructor_availability','instructor_class_slots','client_packages',
+      'class_substitutions','client_rewards','studio_events','guest_profiles','guest_bookings',
+      'client_notes','package_freezes','payroll_adjustments','client_notifications'
+    ]
+    :isInstructor()
+      ?['classes','bookings','class_levels','announcements','studio_events','client_notes']
+      :isReceptionist()
+        ?[]
+        :[
+          'clients','memberships','classes','bookings','class_levels','package_orders',
+          'announcements','client_packages','client_rewards','studio_events','client_notifications'
+        ];
+
+  db={
+    clients:[],memberships:[],products:[],sales:[],expenses:[],classes:[],team:[],bookings:[],
+    class_levels:[],package_orders:[],notification_settings:[],notification_queue:[],
+    studio_settings:[],announcements:[],promo_codes:[],custom_sections:[],custom_entries:[],
+    audit_log:[],instructor_availability:[],instructor_class_slots:[],client_payments:[],
+    client_packages:[],class_substitutions:[],client_rewards:[],studio_events:[],guest_profiles:[],
+    guest_bookings:[],client_notes:[],package_freezes:[],payroll_adjustments:[],
+    client_notifications:[],roster:[],guestRoster:[]
+  };
+
+  // IMPORTANT: paginated fetch instead of a single .select("*")
+  const rs=await Promise.all(tables.map(t=>ctFetchAllRows(t)));
+
+  const bad=rs.find(x=>x.error);
+  if(bad)return authScreen("Database error: "+bad.error.message);
+
+  tables.forEach((t,i)=>db[t]=rs[i].data||[]);
+
+  if(isClient()){
+    const cp=await sb.rpc('client_payment_history');
+    if(!cp.error)db.client_payments=cp.data||[];
+  }
+
+  if(isInstructor()){
+    const [rr,mc,gr]=await Promise.all([
+      sb.rpc('my_instructor_roster'),
+      sb.rpc('my_instructor_classes_v2'),
+      sb.rpc('my_instructor_guest_roster')
+    ]);
+
+    if(rr.error)return authScreen('Schedule access error: '+rr.error.message);
+    if(mc.error)return authScreen('Schedule access error: '+mc.error.message);
+
+    db.roster=rr.data||[];
+    db.classes=mc.data||[];
+    db.guestRoster=gr.error?[]:(gr.data||[]);
+  }
+
+  if(isClient()||isInstructor()){
+    const subs=await sb.rpc('visible_active_class_substitutions');
+    if(!subs.error)db.class_substitutions=subs.data||[];
+  }
+
+  if(isFrontDeskStaff()){
+    const fd=await sb.rpc('is_front_desk_on_duty');
+    db.frontDeskDuty=fd.data===true;
+
+    if(db.frontDeskDuty){
+      const [fr,fm,fp,fc]=await Promise.all([
+        sb.rpc('front_desk_today'),
+        sb.rpc('front_desk_memberships_v2'),
+        sb.rpc('front_desk_products'),
+        sb.rpc('front_desk_booking_classes',{p_days:14})
+      ]);
+
+      if(!fr.error)db.frontDeskToday=fr.data||[];
+      if(!fm.error)db.frontDeskMemberships=fm.data||[];
+      if(!fp.error)db.frontDeskProducts=fp.data||[];
+      if(!fc.error)db.frontDeskBookingClasses=fc.data||[];
+    }
+  }
+
+  if(isInstructor()){
+    const allowed=['instructorhome','schedule','account',...(db.frontDeskDuty?['frontdesk','pos']:[])];
+    if(!allowed.includes(page))page='instructorhome';
+  }
+
+  if(isReceptionist()){
+    const allowed=['account',...(db.frontDeskDuty?['frontdesk','pos']:[])];
+    if(!allowed.includes(page))page=db.frontDeskDuty?'frontdesk':'account';
+  }
+
+  if(isClient()&&!['clienthome','book','mybookings','packages','clientaccount'].includes(page)){
+    page='clienthome';
+  }
+
+  render();
+}
+
+
+
+// ================= CORE THEORY — RELIABLE PASTE SCHEDULE V2 =================
+// Fully self-contained parser. Expected:
+// Monday
+// 8 AM | Pilates | Open Level | By the Book | 5
+
+let ct2PasteRows=[];
+let ct2PasteWeekOffset=1;
+
+function ct2Day(v){
+  const x=String(v||'').trim().replace(/:$/,'').toLowerCase();
+  const map={
+    monday:'Monday',tuesday:'Tuesday',wednesday:'Wednesday',
+    thursday:'Thursday',friday:'Friday',saturday:'Saturday',sunday:'Sunday'
+  };
+  return map[x]||'';
+}
+
+function ct2Time(v){
+  const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');
+  let m=x.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+  if(m){
+    let h=Number(m[1]), min=Number(m[2]||0);
+    if(h<1||h>12||min>59)return '';
+    if(m[3]==='PM'&&h!==12)h+=12;
+    if(m[3]==='AM'&&h===12)h=0;
+    return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  }
+  m=x.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if(m)return `${String(Number(m[1])).padStart(2,'0')}:${m[2]}`;
+  return '';
+}
+
+function ct2Level(v){
+  const raw=String(v||'').trim();
+  const key=raw.toLowerCase().replace(/\s+/g,' ');
+  const aliases={
+    'b':'Beginner','beginner':'Beginner',
+    'ol':'Open Level','open':'Open Level','open level':'Open Level',
+    'li':'Intermediate','intermediate':'Intermediate',
+    'la':'Advanced','advanced':'Advanced'
+  };
+  const wanted=aliases[key]||raw;
+  const found=(db.class_levels||[]).find(
+    l=>String(l.name||'').trim().toLowerCase()===String(wanted).trim().toLowerCase()
+  );
+  return found?.name||'';
+}
+
+function ct2Studio(v){
+  const x=String(v||'').trim().toLowerCase().replace(/\s+/g,'');
+  if(x==='pilates'||x==='reformer')return 'Pilates';
+  if(x==='megacore'||x==='mega'||x==='lagree')return 'Megacore';
+  return '';
+}
+
+function ct2DateForDay(dayName,weekOffset){
+  const monday=mondayOfWeek(Number(weekOffset)||0);
+  const indexes={Monday:0,Tuesday:1,Wednesday:2,Thursday:3,Friday:4,Saturday:5,Sunday:6};
+  const d=new Date(monday);
+  d.setDate(monday.getDate()+indexes[dayName]);
+  return dateISO(d);
+}
+
+function ct2Parse(text,weekOffset){
+  const rows=[],errors=[];
+  let day='';
+
+  String(text||'').split(/\r?\n/).forEach((original,i)=>{
+    const line=original.trim();
+    if(!line)return;
+
+    const maybeDay=ct2Day(line);
+    if(maybeDay){
+      day=maybeDay;
+      return;
+    }
+
+    if(!day){
+      errors.push(`Line ${i+1}: write the weekday first.`);
+      return;
+    }
+
+    const p=line.split('|').map(x=>x.trim());
+    if(p.length!==5){
+      errors.push(`Line ${i+1}: use Time | Studio | Level | Class Name | Capacity`);
+      return;
+    }
+
+    const [timeRaw,studioRaw,levelRaw,classRaw,capRaw]=p;
+    const time=ct2Time(timeRaw);
+    const studio=ct2Studio(studioRaw);
+    const level=ct2Level(levelRaw);
+    const className=String(classRaw||'').trim();
+    const capacity=Number(capRaw);
+
+    if(!time){errors.push(`Line ${i+1}: invalid time "${timeRaw}".`);return;}
+    if(!studio){errors.push(`Line ${i+1}: studio must be Pilates or Megacore.`);return;}
+    if(!level){errors.push(`Line ${i+1}: level "${levelRaw}" is not in Class Levels.`);return;}
+    if(!className){errors.push(`Line ${i+1}: class name is missing.`);return;}
+    if(!Number.isInteger(capacity)||capacity<1){errors.push(`Line ${i+1}: capacity must be a whole number.`);return;}
+
+    rows.push({
+      day,
+      class_date:ct2DateForDay(day,weekOffset),
+      class_time:time,
+      studio_type:studio,
+      level,
+      class_type:className,
+      capacity
+    });
+  });
+
+  return {rows,errors};
+}
+
+function pasteScheduleModal(){
+  modal('Paste Schedule',`
+    <div class="form">
+      <div>
+        <label>Start week</label>
+        <select id="ctPasteWeek">
+          <option value="0">This week</option>
+          <option value="1" selected>Next week</option>
+          <option value="2">2 weeks from now</option>
+          <option value="3">3 weeks from now</option>
+          <option value="4">4 weeks from now</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Repeat</label>
+        <select id="ctPasteRepeat">
+          <option value="1">This week only</option>
+          <option value="4">Every week for 4 weeks</option>
+          <option value="8">Every week for 8 weeks</option>
+          <option value="12" selected>Every week for 12 weeks</option>
+          <option value="24">Every week for 24 weeks</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Paste timetable</label>
+        <textarea id="ctPasteText" rows="24" spellcheck="false" placeholder="Monday
+8 AM | Pilates | Open Level | By the Book | 5
+9 AM | Pilates | Beginner | By the Book | 5
+10 AM | Pilates | Open Level | Cheeky Business | 5
+
+Tuesday
+8 AM | Pilates | Beginner | By the Book | 5"></textarea>
+      </div>
+
+      <div class="full">
+        <p class="muted">
+          Use exactly: <b>Time | Studio | Level | Class Name | Capacity</b><br>
+          No instructor name.
+        </p>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" type="button" onclick="previewPastedSchedule()">Preview Schedule</button>
+      </div>
+    </div>
+  `);
+}
+
+function previewPastedSchedule(){
+  const text=$("#ctPasteText")?.value||'';
+  const weekOffset=Number($("#ctPasteWeek")?.value||0);
+  const repeatWeeks=Number($("#ctPasteRepeat")?.value||1);
+
+  const parsed=ct2Parse(text,weekOffset);
+
+  if(parsed.errors.length){
+    return alert('Nothing was added. Fix these lines first:\n\n'+parsed.errors.join('\n'));
+  }
+  if(!parsed.rows.length)return alert('No classes found.');
+
+  ct2PasteWeekOffset=weekOffset;
+  ct2PasteRows=parsed.rows.map(r=>({...r,repeat_weeks:repeatWeeks}));
+
+  const total=ct2PasteRows.length*repeatWeeks;
+
+  modal('Preview Schedule',`
+    <div class="notice card" style="margin-bottom:12px">
+      <b>${ct2PasteRows.length} classes per week</b><br>
+      ${repeatWeeks===1?'One week only':`Repeating for ${repeatWeeks} weeks`}<br>
+      <b>${total} total classes</b>
+    </div>
+
+    <div class="card" style="overflow:auto;max-height:55vh">
+      <table>
+        <thead><tr>
+          <th>Day</th><th>Date</th><th>Time</th><th>Studio</th>
+          <th>Level</th><th>Class</th><th>Capacity</th>
+        </tr></thead>
+        <tbody>
+          ${ct2PasteRows.map(r=>`<tr>
+            <td>${esc(r.day)}</td>
+            <td>${esc(r.class_date)}</td>
+            <td>${formatTime(r.class_time)}</td>
+            <td>${esc(r.studio_type)}</td>
+            <td>${esc(r.level)}</td>
+            <td>${esc(r.class_type)}</td>
+            <td>${r.capacity}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" type="button" onclick="pasteScheduleModal()">Back</button>
+      <button class="btn primary" id="ct2CreateBtn" type="button" onclick="savePastedSchedule()">
+        Create ${total} Classes
+      </button>
+    </div>
+  `);
+}
+
+async function savePastedSchedule(){
+  if(!ct2PasteRows.length)return alert('Preview the schedule first.');
+
+  const repeatWeeks=Number(ct2PasteRows[0].repeat_weeks||1);
+  const group=repeatWeeks>1?crypto.randomUUID():null;
+  const payload=[];
+
+  for(const r of ct2PasteRows){
+    const base=new Date(r.class_date+'T12:00:00');
+    for(let w=0;w<repeatWeeks;w++){
+      const d=new Date(base);
+      d.setDate(base.getDate()+w*7);
+      payload.push({
+        class_date:dateISO(d),
+        class_time:r.class_time,
+        class_type:r.class_type,
+        instructor:'',
+        instructor_user_id:null,
+        capacity:r.capacity,
+        studio_type:r.studio_type,
+        level:r.level,
+        recurring_group:group
+      });
+    }
+  }
+
+  const btn=$("#ct2CreateBtn");
+  if(btn){btn.disabled=true;btn.textContent='Creating…';}
+
+  // Insert in small batches for reliability.
+  const batchSize=100;
+  let created=0;
+
+  for(let i=0;i<payload.length;i+=batchSize){
+    const batch=payload.slice(i,i+batchSize);
+    const {error}=await sb.from('classes').insert(batch);
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Try Again';}
+      await loadAll();
+      return alert(
+        `${created} classes were created before an error stopped the paste:\n\n${error.message}`
+      );
+    }
+
+    created+=batch.length;
+    if(btn)btn.textContent=`Creating… ${created}/${payload.length}`;
+  }
+
+  // Instructor auto-assignment is separate; a failure here should NOT undo the schedule.
+  try{ await sb.rpc('auto_assign_classes_from_slots'); }catch(e){}
+
+  ct2PasteRows=[];
+  $("#modal")?.remove();
+
+  await loadAll();
+  scheduleWeekOffset=ct2PasteWeekOffset;
+  studioTab='Pilates';
+  page='schedule';
+  schedule();
+
+  alert(`${created} classes created successfully.`);
+}
+
+
+
+// ================= CORE THEORY — CLIENT WEEKLY SCHEDULE DIRECT LOAD FIX =================
+// The client booking page now loads the selected week directly from Supabase.
+// It no longer depends on the large all-classes cache, which can make days disappear
+// when the studio has a very large recurring timetable.
+
+async function book(){
+  const mon=ctClientWeekStart(clientBookWeekOffset);
+  const days=[];
+
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);
+    d.setDate(mon.getDate()+i);
+    days.push(d);
+  }
+
+  const startDate=dateISO(days[0]);
+  const endDate=dateISO(days[6]);
+
+  // Show the page shell immediately.
+  layout(`
+    <div class="schedule-tabs">
+      <button class="tab ${studioTab==='Pilates'?'active':''}" onclick="studioTab='Pilates';book()">PILATES</button>
+      <button class="tab ${studioTab==='Megacore'?'active':''}" onclick="studioTab='Megacore';book()">MEGACORE</button>
+    </div>
+
+    <div class="ct-client-week-nav">
+      <button class="btn" ${clientBookWeekOffset<=0?'disabled':''}
+        onclick="if(clientBookWeekOffset>0){clientBookWeekOffset--;book()}">← Previous</button>
+
+      <button class="btn" onclick="clientBookWeekOffset=0;book()">This week</button>
+
+      <button class="btn" onclick="clientBookWeekOffset++;book()">Next →</button>
+    </div>
+
+    <div class="ct-client-week-label">
+      ${esc(
+        `${mon.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – `+
+        `${days[6].toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`
+      )}
+    </div>
+
+    <div id="ctClientWeekBody" class="ct-client-week-days">
+      <div class="card empty">Loading classes…</div>
+    </div>
+  `,'Book a Class','Browse future weeks and reserve Pilates or Megacore classes');
+
+  const box=$("#ctClientWeekBody");
+  if(!box)return;
+
+  const {data,error}=await sb
+    .from('classes')
+    .select('*')
+    .gte('class_date',startDate)
+    .lte('class_date',endDate)
+    .eq('studio_type',studioTab)
+    .eq('cancelled',false)
+    .order('class_date',{ascending:true})
+    .order('class_time',{ascending:true});
+
+  if(error){
+    box.innerHTML=`<div class="warning">Could not load this week: ${esc(error.message)}</div>`;
+    return;
+  }
+
+  const classes=(data||[])
+    .filter(c=>!ctClientClassIsPast(c))
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  // Keep the week we just loaded available to the booking modal.
+  const otherClasses=(db.classes||[]).filter(c=>c.class_date<startDate||c.class_date>endDate||(c.studio_type||'Pilates')!==studioTab);
+  db.classes=[...otherClasses,...classes];
+
+  const grouped={};
+  days.forEach(d=>grouped[dateISO(d)]=[]);
+  classes.forEach(c=>(grouped[c.class_date]??=[]).push(c));
+
+  box.innerHTML=days.map(d=>{
+    const key=dateISO(d);
+    const dayClasses=grouped[key]||[];
+
+    return `
+      <section class="ct-client-day">
+        <div class="ct-client-day-head">
+          <b>${d.toLocaleDateString(undefined,{weekday:'long'})}</b>
+          <span>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+        </div>
+
+        <div class="ct-client-day-classes">
+          ${dayClasses.map(ctClientClassCard).join('') || '<div class="ct-client-no-class">No classes</div>'}
+        </div>
+      </section>`;
+  }).join('');
+}
+
+
+
+// ================= CORE THEORY — OWNER MONTH CATEGORIZATION =================
+
+let ownerMonth = (() => {
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+})();
+
+function ctMonthKey(v){ return String(v||'').slice(0,7); }
+function ctInOwnerMonth(v){ return ctMonthKey(v)===ownerMonth; }
+
+function ctOwnerMonthLabel(){
+  const [y,m]=ownerMonth.split('-').map(Number);
+  return new Date(y,m-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'});
+}
+
+function ctChangeOwnerMonth(v){
+  ownerMonth=v||currentYM();
+  render();
+}
+
+function ctShiftOwnerMonth(delta){
+  const [y,m]=ownerMonth.split('-').map(Number);
+  const d=new Date(y,m-1+delta,1);
+  ownerMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  render();
+}
+
+function ctMonthPickerHtml(){
+  if(!isOwner())return '';
+  return `
+    <div class="ct-month-picker">
+      <button class="btn small" onclick="ctShiftOwnerMonth(-1)">←</button>
+      <input type="month" value="${ownerMonth}" onchange="ctChangeOwnerMonth(this.value)">
+      <button class="btn small" onclick="ctShiftOwnerMonth(1)">→</button>
+      <button class="btn small" onclick="ctChangeOwnerMonth(currentYM())">This month</button>
+    </div>
+  `;
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  $("#app").innerHTML=`
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="nav">${nav()}</div>
+        <div class="role-chip">${esc(profile?.full_name||profile?.email||'')}<small>${role}</small></div>
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h1>${title}</h1>
+            <p>${subtitle}</p>
+            ${isOwner()?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+            <div class="sync-note">☁ Cloud connected</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${ctMonthPickerHtml()}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{page='custom:'+b.dataset.custom;render()});
+}
+
+function dashboard(){
+  const sales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const classes=db.classes.filter(c=>ctInOwnerMonth(c.class_date)&&!c.cancelled);
+  const rev=sales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const taught=classes.filter(classWasTaught).length;
+  const checked=classes.reduce((a,c)=>a+classCheckedInCount(c),0);
+  const cap=classes.reduce((a,c)=>a+Number(c.capacity||0),0);
+  const occupancy=cap?Math.round((checked/cap)*100):0;
+
+  layout(`
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+      <div class="card kpi"><div class="label">Occupancy</div><div class="value">${occupancy}%</div></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="grid three">
+      <div class="card">
+        <h3>Classes</h3>
+        <div class="cart-row"><span>Scheduled</span><b>${classes.length}</b></div>
+        <div class="cart-row"><span>Taught</span><b>${taught}</b></div>
+        <div class="cart-row"><span>Checked in</span><b>${checked}</b></div>
+      </div>
+      <div class="card">
+        <h3>Sales</h3>
+        <div class="cart-row"><span>Transactions</span><b>${sales.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+      </div>
+      <div class="card">
+        <h3>Expenses</h3>
+        <div class="cart-row"><span>Entries</span><b>${expenses.length}</b></div>
+        <div class="cart-row"><span>Total</span><b>${money(exp)}</b></div>
+      </div>
+    </div>
+  `,'Dashboard','Monthly studio overview');
+}
+
+function expenses(){
+  const rows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date))
+    .sort((a,b)=>String(b.expense_date||'').localeCompare(String(a.expense_date||'')));
+  const total=rows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="expenseModal()">+ Add expense</button>
+        <div class="muted"><b>${esc(ctOwnerMonthLabel())}</b> · ${money(total)} total</div>
+      </div>
+      ${rows.length?`
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead>
+          <tbody>${rows.map(e=>`
+            <tr>
+              <td>${esc(e.expense_date)}</td>
+              <td>${esc(e.category)}</td>
+              <td>${esc(e.description||'')}</td>
+              <td>${money(e.amount)}</td>
+              <td>
+                <button class="btn small" onclick="expenseModal('${e.id}')">Edit</button>
+                <button class="btn small danger" onclick="removeItem('expenses','${e.id}')">Delete</button>
+              </td>
+            </tr>`).join('')}</tbody>
+        </table>
+      `:'<div class="empty">No expenses in this month.</div>'}
+    </div>
+  `,'Expenses',`${ctOwnerMonthLabel()} studio costs`);
+}
+
+function finance(){
+  const active=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expRows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const rev=active.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expRows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">Sales · ${esc(ctOwnerMonthLabel())}</h3>
+        <input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px">
+      </div>
+      <div id="paymentHistoryRows"></div>
+    </div>
+  `,'Finance',`${ctOwnerMonthLabel()} sales and profit`);
+  renderPaymentHistory('');
+}
+
+function renderPaymentHistory(query=''){
+  const box=$("#paymentHistoryRows");
+  if(!box)return;
+  const q=String(query||'').trim().toLowerCase();
+  const rows=[...db.sales]
+    .filter(s=>ctInOwnerMonth(s.created_at))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))
+    .filter(s=>{
+      const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total,saleCollector(s)].join(' ').toLowerCase();
+      return !q||hay.includes(q);
+    });
+
+  box.innerHTML=rows.length?`
+    <div style="overflow:auto">
+      <table>
+        <thead><tr><th>Date / time</th><th>Client</th><th>Paid for</th><th>Method</th><th>Amount</th><th>Recorded by</th><th></th></tr></thead>
+        <tbody>${rows.map(s=>`
+          <tr>
+            <td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}${s.edited_at?'<div class="muted">Edited</div>':''}</td>
+            <td><b>${esc(saleClientName(s))}</b></td>
+            <td>${esc(saleWhat(s))}</td>
+            <td>${esc(s.payment_method||'—')}</td>
+            <td><b>${money(s.total)}</b>${s.voided_at?'<div class="muted">Voided</div>':''}</td>
+            <td>${esc(saleCollector(s))}</td>
+            <td>
+              <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+              ${s.voided_at?'<span class="badge">Voided</span>':`<button class="btn small" onclick="editSaleModal('${s.id}')">Edit</button> <button class="btn small danger" onclick="voidSale('${s.id}')">Void</button>`}
+            </td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `:'<div class="empty">No sales in this month.</div>';
+}
+
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const zeroAttendance=activeClasses.filter(c=>
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date() &&
+    classCheckedInCount(c)===0
+  ).length;
+
+  const unassigned=activeClasses.filter(c=>!c.instructor_user_id).length;
+  const waitlisted=db.bookings.filter(b=>{
+    const c=db.classes.find(x=>String(x.id)===String(b.class_id));
+    return b.status==='waitlist'&&c&&ctInOwnerMonth(c.class_date);
+  }).length;
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="grid two">
+      <div class="card">
+        <h3>Monthly alerts</h3>
+        <div class="cart-row"><span>Classes without instructor</span><b>${unassigned}</b></div>
+        <div class="cart-row"><span>Zero-attendance past classes</span><b>${zeroAttendance}</b></div>
+        <div class="cart-row"><span>Waitlisted bookings</span><b>${waitlisted}</b></div>
+        <div class="cart-row"><span>Cancelled classes</span><b>${monthClasses.filter(c=>c.cancelled).length}</b></div>
+      </div>
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+      <div class="card">
+        <h3>Reports & backup</h3>
+        <p class="muted">Viewing ${esc(ctOwnerMonthLabel())}.</p>
+        <button class="btn" onclick="exportData()">Full backup JSON</button>
+        <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button>
+      </div>
+      <div class="card">
+        <h3>Events & announcements</h3>
+        <p class="muted">Events and announcements remain global because they can span more than one month.</p>
+        <div class="cart-row"><span>Active events</span><b>${db.studio_events.filter(e=>!e.archived_at&&e.active).length}</b></div>
+        <div class="cart-row"><span>Active announcements</span><b>${db.announcements.filter(a=>a.active!==false).length}</b></div>
+      </div>
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts and studio activity`);
+}
+
+(function(){
+  if(document.getElementById('ctMonthStyles'))return;
+  const s=document.createElement('style');
+  s.id='ctMonthStyles';
+  s.textContent=`
+    .ct-month-picker{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .ct-month-picker input[type="month"]{border:1px solid rgba(0,0,0,.12);border-radius:10px;padding:8px 10px;background:#fff;min-width:145px}
+    @media(max-width:700px){.topbar{align-items:flex-start;gap:12px}.ct-month-picker{width:100%}}
+  `;
+  document.head.appendChild(s);
+})();
+
+
+
+// ================= CORE THEORY — EXPENSE QUANTITY =================
+
+function expenseModal(id=''){
+  const e=id?db.expenses.find(x=>String(x.id)===String(id)):null;
+  const qty=Number(e?.quantity||1);
+  const total=Number(e?.amount||0);
+  const unit=qty>0?total/qty:total;
+
+  modal(e?'Edit expense':'Add expense',`
+    <div class="form">
+      <div>
+        <label>Date</label>
+        <input type="date" id="edate" value="${e?.expense_date||today()}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <select id="ecat">
+          ${['Electricity','Rent','Water','Internet','Cleaning','Payroll','Inventory','Marketing','Maintenance','Other']
+            .map(x=>`<option ${x===e?.category?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <label>Description</label>
+        <input id="edesc" value="${esc(e?.description||'')}" placeholder="e.g. Grip socks">
+      </div>
+
+      <div>
+        <label>Quantity</label>
+        <input id="eqty" type="number" min="1" step="1" value="${qty}" oninput="updateExpenseTotal()">
+      </div>
+
+      <div>
+        <label>Price per item</label>
+        <input id="eunit" type="number" min="0" step=".01" value="${unit||''}" oninput="updateExpenseTotal()">
+      </div>
+
+      <div>
+        <label>Total</label>
+        <input id="eamount" type="number" step=".01" value="${total||''}" readonly>
+      </div>
+
+      <div>
+        <label>Payment</label>
+        <select id="epay">
+          ${['Cash','Card','Whish','Transfer'].map(x=>`<option ${x===e?.payment_method?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${e?`saveExpense('${e.id}')`:'addExpense()'}">
+          ${e?'Save changes':'Save expense'}
+        </button>
+      </div>
+    </div>
+  `);
+
+  updateExpenseTotal();
+}
+
+function updateExpenseTotal(){
+  const qty=Math.max(1,Number($("#eqty")?.value||1));
+  const unit=Math.max(0,Number($("#eunit")?.value||0));
+  const total=$("#eamount");
+  if(total)total.value=(qty*unit).toFixed(2);
+}
+
+async function addExpense(){
+  const quantity=Math.max(1,parseInt($("#eqty").value||'1',10));
+  const payload={
+    expense_date:$("#edate").value,
+    category:$("#ecat").value,
+    description:$("#edesc").value,
+    quantity,
+    amount:+$("#eamount").value,
+    payment_method:$("#epay").value,
+    created_by:session.user.id
+  };
+  const {error}=await sb.from('expenses').insert(payload);
+  if(error)return alert(error.message);
+  $("#modal").remove();
+  await loadAll();
+}
+
+async function saveExpense(id){
+  const quantity=Math.max(1,parseInt($("#eqty").value||'1',10));
+  const payload={
+    expense_date:$("#edate").value,
+    category:$("#ecat").value,
+    description:$("#edesc").value,
+    quantity,
+    amount:+$("#eamount").value,
+    payment_method:$("#epay").value
+  };
+  const {error}=await sb.from('expenses').update(payload).eq('id',id);
+  if(error)return alert(error.message);
+  $("#modal").remove();
+  await loadAll();
+  alert('Expense updated.');
+}
+
+function expenses(){
+  const rows=db.expenses
+    .filter(e=>ctInOwnerMonth(e.expense_date))
+    .sort((a,b)=>String(b.expense_date||'').localeCompare(String(a.expense_date||'')));
+
+  const total=rows.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="expenseModal()">+ Add expense</button>
+        <div class="muted"><b>${esc(ctOwnerMonthLabel())}</b> · ${money(total)} total</div>
+      </div>
+
+      ${rows.length?`
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Qty</th>
+              <th>Total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(e=>`
+              <tr>
+                <td>${esc(e.expense_date)}</td>
+                <td>${esc(e.category)}</td>
+                <td>${esc(e.description||'')}</td>
+                <td>${Number(e.quantity||1)}</td>
+                <td>${money(e.amount)}</td>
+                <td>
+                  <button class="btn small" onclick="expenseModal('${e.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('expenses','${e.id}')">Delete</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      `:'<div class="empty">No expenses in this month.</div>'}
+    </div>
+  `,'Expenses',`${ctOwnerMonthLabel()} studio costs`);
+}
+
+
+
+// ================= CORE THEORY — INVENTORY PRODUCT VARIANTS =================
+
+function ctProductVariants(productId){
+  return (db.product_variants||[])
+    .filter(v=>String(v.product_id)===String(productId)&&v.active!==false)
+    .sort((a,b)=>String(a.variant_name||'').localeCompare(String(b.variant_name||'')));
+}
+
+function ctVariantLabel(product){
+  return product?.variant_type || 'Variant';
+}
+
+function ctVariantRowsText(productId){
+  return ctProductVariants(productId)
+    .map(v=>`${v.variant_name} | ${Number(v.stock||0)}`)
+    .join('\n');
+}
+
+async function ctReloadProductVariants(){
+  if(isOwner()){
+    const {data,error}=await ctFetchAllRows('product_variants');
+    if(!error)db.product_variants=data||[];
+    return;
+  }
+
+  if(isFrontDeskStaff()&&db.frontDeskDuty){
+    const {data,error}=await sb.rpc('front_desk_product_variants');
+    if(!error)db.product_variants=data||[];
+  }
+}
+
+function productModal(p=null){
+  const editing=!!p;
+  const variantType=p?.variant_type||'';
+
+  modal(editing?'Edit product':'Add product',`
+    <div class="form">
+      <div>
+        <label>Name</label>
+        <input id="pname" value="${esc(p?.name||'')}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <input id="pcat" value="${esc(p?.category||'Retail')}">
+      </div>
+
+      <div>
+        <label>Cost</label>
+        <input id="pcost" type="number" step=".01" value="${p?.cost??''}">
+      </div>
+
+      <div>
+        <label>Sell price</label>
+        <input id="pprice" type="number" step=".01" value="${p?.price??''}">
+      </div>
+
+      <div>
+        <label>Low stock</label>
+        <input id="pmin" type="number" value="${p?.minimum_stock??5}">
+      </div>
+
+      <div>
+        <label>Variant type</label>
+        <select id="pvarianttype" onchange="ctToggleVariantEditor()">
+          <option value="" ${!variantType?'selected':''}>No variants</option>
+          <option value="Color" ${variantType==='Color'?'selected':''}>Color</option>
+          <option value="Flavor" ${variantType==='Flavor'?'selected':''}>Flavor</option>
+          <option value="Size" ${variantType==='Size'?'selected':''}>Size</option>
+          <option value="Style" ${variantType==='Style'?'selected':''}>Style</option>
+          <option value="Other" ${variantType==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+
+      <div class="full" id="ctVariantEditor" style="${variantType?'':'display:none'}">
+        <label>Variants & stock</label>
+        <textarea id="pvariants" rows="8" placeholder="Black | 5
+Burgundy | 4
+Grey | 3">${editing?esc(ctVariantRowsText(p.id)):''}</textarea>
+        <small class="muted">
+          One option per line: <b>Name | Stock</b><br>
+          Example for a reformer cover: Black | 5
+        </small>
+      </div>
+
+      <div class="full">
+        <div class="notice card" style="margin:0">
+          <b>Total stock</b>
+          <p class="muted" style="margin:4px 0 0">
+            If the product has variants, total stock is calculated automatically from all colors / flavors / sizes.
+          </p>
+        </div>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">
+          ${editing?'Save changes':'Save product'}
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctToggleVariantEditor(){
+  const box=$("#ctVariantEditor");
+  if(box)box.style.display=$("#pvarianttype")?.value?'block':'none';
+}
+
+function ctParseVariants(){
+  const type=$("#pvarianttype")?.value||'';
+  if(!type)return {type:'',rows:[]};
+
+  const raw=$("#pvariants")?.value||'';
+  const rows=[];
+  const errors=[];
+
+  raw.split(/\r?\n/).forEach((line,i)=>{
+    const x=line.trim();
+    if(!x)return;
+    const parts=x.split('|').map(v=>v.trim());
+    if(parts.length!==2){
+      errors.push(`Line ${i+1}: use Name | Stock`);
+      return;
+    }
+    const name=parts[0];
+    const stock=Number(parts[1]);
+    if(!name){
+      errors.push(`Line ${i+1}: variant name is missing.`);
+      return;
+    }
+    if(!Number.isInteger(stock)||stock<0){
+      errors.push(`Line ${i+1}: stock must be 0 or a whole number.`);
+      return;
+    }
+    rows.push({variant_name:name,stock});
+  });
+
+  return {type,rows,errors};
+}
+
+async function ctSaveProductVariants(productId,variantType,rows){
+  const {error:delError}=await sb.from('product_variants').delete().eq('product_id',productId);
+  if(delError)return delError;
+
+  if(rows.length){
+    const {error:insError}=await sb.from('product_variants').insert(
+      rows.map(r=>({
+        product_id:productId,
+        variant_name:r.variant_name,
+        stock:r.stock,
+        active:true
+      }))
+    );
+    if(insError)return insError;
+  }
+
+  const total=rows.reduce((a,r)=>a+Number(r.stock||0),0);
+  const {error:updateError}=await sb.from('products')
+    .update({variant_type:variantType||null,stock:variantType?total:Number($("#pstock")?.value||0)})
+    .eq('id',productId);
+
+  return updateError||null;
+}
+
+async function addProduct(){
+  const parsed=ctParseVariants();
+  if(parsed.errors?.length)return alert(parsed.errors.join('\n'));
+
+  const payload={
+    name:$("#pname").value.trim(),
+    category:$("#pcat").value.trim(),
+    cost:+$("#pcost").value,
+    price:+$("#pprice").value,
+    stock:parsed.type?parsed.rows.reduce((a,r)=>a+r.stock,0):0,
+    minimum_stock:+$("#pmin").value,
+    variant_type:parsed.type||null
+  };
+
+  if(!payload.name)return alert('Enter a product name.');
+
+  const {data,error}=await sb.from('products').insert(payload).select('*').single();
+  if(error)return alert(error.message);
+
+  if(parsed.type){
+    const vError=await ctSaveProductVariants(data.id,parsed.type,parsed.rows);
+    if(vError)return alert(vError.message);
+  }
+
+  $("#modal").remove();
+  await loadAll();
+}
+
+async function saveProduct(id){
+  const parsed=ctParseVariants();
+  if(parsed.errors?.length)return alert(parsed.errors.join('\n'));
+
+  const product=db.products.find(x=>String(x.id)===String(id));
+  const total=parsed.type?parsed.rows.reduce((a,r)=>a+r.stock,0):Number(product?.stock||0);
+
+  const payload={
+    name:$("#pname").value.trim(),
+    category:$("#pcat").value.trim(),
+    cost:+$("#pcost").value,
+    price:+$("#pprice").value,
+    stock:total,
+    minimum_stock:+$("#pmin").value,
+    variant_type:parsed.type||null
+  };
+
+  if(!payload.name)return alert('Enter a product name.');
+
+  const {error}=await sb.from('products').update(payload).eq('id',id);
+  if(error)return alert(error.message);
+
+  const vError=await ctSaveProductVariants(id,parsed.type,parsed.rows);
+  if(vError)return alert(vError.message);
+
+  $("#modal").remove();
+  await loadAll();
+  alert('Product updated.');
+}
+
+function inventory(){
+  const rows=db.products||[];
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="productModal()">+ Add product</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variants</th>
+            <th>Cost</th>
+            <th>Sell</th>
+            <th>Total stock</th>
+            <th>Low stock</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows.map(p=>{
+            const variants=ctProductVariants(p.id);
+            return `
+              <tr>
+                <td>
+                  <b>${esc(p.name)}</b>
+                  <div class="muted">${esc(p.category||'')}</div>
+                </td>
+
+                <td>
+                  ${variants.length
+                    ? `<b>${esc(ctVariantLabel(p))}</b><br>${variants.map(v=>`<span class="badge">${esc(v.variant_name)} · ${Number(v.stock||0)}</span>`).join(' ')}`
+                    : '<span class="muted">—</span>'}
+                </td>
+
+                <td>${money(p.cost)}</td>
+                <td>${money(p.price)}</td>
+                <td>${Number(p.stock||0)}</td>
+                <td>${p.minimum_stock??0}</td>
+
+                <td>
+                  <button class="btn small" onclick="editProduct('${p.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `,'Inventory','Products, variants, colors, flavors and stock');
+}
+
+function ctChooseProductVariant(product){
+  const variants=ctProductVariants(product.id).filter(v=>Number(v.stock||0)>0);
+  if(!variants.length)return alert(`No ${ctVariantLabel(product).toLowerCase()} options are in stock.`);
+
+  modal(`Choose ${esc(ctVariantLabel(product))}`,`
+    <p><b>${esc(product.name)}</b></p>
+    <div style="display:grid;gap:8px">
+      ${variants.map(v=>`
+        <button class="btn" onclick="ctAddVariantToCart('${product.id}','${v.id}')">
+          ${esc(v.variant_name)}
+          <span class="muted"> · ${Number(v.stock||0)} in stock</span>
+        </button>
+      `).join('')}
+    </div>
+  `);
+}
+
+function ctAddVariantToCart(productId,variantId){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const p=products.find(x=>String(x.id)===String(productId));
+  const v=(db.product_variants||[]).find(x=>String(x.id)===String(variantId));
+  if(!p||!v)return alert('Variant not found. Refresh and try again.');
+  if(Number(v.stock||0)<=0)return alert('This option is out of stock.');
+
+  cart.push({
+    ...p,
+    kind:'product',
+    variant_id:v.id,
+    variant_name:v.variant_name,
+    name:`${p.name} · ${v.variant_name}`
+  });
+
+  $("#modal")?.remove();
+  posPromo=null;
+  pos();
+}
+
+function addCart(kind,id){
+  const src=kind==='product'
+    ?(isOwner()?db.products:(db.frontDeskProducts||[]))
+    :(isOwner()?db.memberships:(db.frontDeskMemberships||[]));
+
+  const x=src.find(a=>String(a.id)===String(id));
+  if(!x)return alert('Item not found. Refresh and try again.');
+
+  if(kind==='product' && x.variant_type){
+    return ctChooseProductVariant(x);
+  }
+
+  cart.push({...x,kind});
+  posPromo=null;
+  pos();
+}
+
+// Make sure variants are available after normal data loading.
+const ctOriginalLoadAllForVariants = loadAll;
+loadAll = async function(){
+  await ctOriginalLoadAllForVariants();
+  if(!session||!profile)return;
+  await ctReloadProductVariants();
+};
+
+
+
+// ================= CORE THEORY — RESTORE OPERATIONS SECTIONS =================
+// Keeps the monthly alerts/totals while restoring Events, Announcements and Promo Codes.
+
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const zeroAttendance=activeClasses.filter(c=>
+    new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`)<new Date() &&
+    classCheckedInCount(c)===0
+  ).length;
+
+  const unassigned=activeClasses.filter(c=>!c.instructor_user_id).length;
+
+  const waitlisted=db.bookings.filter(b=>{
+    const c=db.classes.find(x=>String(x.id)===String(b.class_id));
+    return b.status==='waitlist'&&c&&ctInOwnerMonth(c.class_date);
+  }).length;
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const events=(db.studio_events||[]).filter(e=>!e.archived_at);
+  const announcements=(db.announcements||[]).filter(a=>!a.archived_at);
+  const promos=(db.promo_codes||[]).filter(p=>!p.archived_at);
+
+  layout(`
+    <div class="grid two">
+
+      <div class="card">
+        <h3>Monthly alerts</h3>
+        <div class="cart-row"><span>Classes without instructor</span><b>${unassigned}</b></div>
+        <div class="cart-row"><span>Zero-attendance past classes</span><b>${zeroAttendance}</b></div>
+        <div class="cart-row"><span>Waitlisted bookings</span><b>${waitlisted}</b></div>
+        <div class="cart-row"><span>Cancelled classes</span><b>${monthClasses.filter(c=>c.cancelled).length}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Events & Specials</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="eventModal()">+ Event</button>
+        </div>
+
+        ${events.length?events.map(e=>{
+          const p=typeof eventPerformance==='function'
+            ?eventPerformance(e)
+            :{booked:0,checked:0,converted:0};
+
+          return `
+            <div class="cart-row">
+              <span>
+                <b>${esc(e.title)}</b>
+                <small>
+                  ${esc(e.start_date||'')} → ${esc(e.end_date||'')} ·
+                  ${esc(e.studio_scope||'Both')} ·
+                  ${e.active?'Active':'Inactive'}
+                </small>
+                <small>${esc(e.description||'')}</small>
+                ${p?`<small>Booked guests: ${p.booked||0} · Checked in: ${p.checked||0} · Converted: ${p.converted||0}</small>`:''}
+              </span>
+
+              <span>
+                <button class="btn small" onclick="eventModal('${e.id}')">Edit</button>
+                <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">
+                  ${e.active?'Deactivate':'Activate'}
+                </button>
+                <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                  ?`archiveRecord('studio_events','${e.id}')`
+                  :`removeItem('studio_events','${e.id}')`}">
+                  ${typeof archiveRecord==='function'?'Archive':'Delete'}
+                </button>
+              </span>
+            </div>`;
+        }).join(''):'<div class="empty">No events yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Announcements</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="announcementModal()">+ Announcement</button>
+        </div>
+
+        ${announcements.length?announcements.map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.title)}</b>
+              <small>${esc(a.message||'')}</small>
+              <small>${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small>
+            </span>
+
+            <span>
+              <button class="btn small" onclick="announcementModal('${a.id}')">Edit</button>
+              <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">
+                ${a.active===false?'Activate':'Deactivate'}
+              </button>
+              <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                ?`archiveRecord('announcements','${a.id}')`
+                :`removeItem('announcements','${a.id}')`}">
+                ${typeof archiveRecord==='function'?'Archive':'Delete'}
+              </button>
+            </span>
+          </div>`).join(''):'<div class="empty">No announcements yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Promo Codes</h3>
+        <div class="toolbar">
+          <button class="btn primary" onclick="promoModal()">+ Promo code</button>
+        </div>
+
+        ${promos.length?promos.map(p=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(p.code)}</b>
+              <small>
+                ${p.discount_type==='fixed'
+                  ?money(p.discount_value)
+                  :`${p.discount_value??p.discount_percent??0}% off`}
+                · ${esc(p.studio_scope||'Both')}
+                · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'}
+                · ${p.active?'Active':'Inactive'}
+              </small>
+              ${p.starts_at||p.ends_at?`<small>${esc(p.starts_at||'No start')} → ${esc(p.ends_at||'No end')}</small>`:''}
+            </span>
+
+            <span>
+              <button class="btn small" onclick="promoModal('${p.id}')">Edit</button>
+              <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">
+                ${p.active?'Deactivate':'Activate'}
+              </button>
+              <button class="btn small danger" onclick="${typeof archiveRecord==='function'
+                ?`archiveRecord('promo_codes','${p.id}')`
+                :`removeItem('promo_codes','${p.id}')`}">
+                ${typeof archiveRecord==='function'?'Archive':'Delete'}
+              </button>
+            </span>
+          </div>`).join(''):'<div class="empty">No promo codes yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Reports & Backup</h3>
+        <p class="muted">Viewing ${esc(ctOwnerMonthLabel())}.</p>
+        <button class="btn" onclick="exportData()">Full backup JSON</button>
+        <button class="btn" onclick="exportClientsCSV()">Export clients CSV</button>
+      </div>
+
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts, promos, events and announcements`);
+}
+
+
+
+// ================= CORE THEORY — RESTORE ALL DISPLACED FEATURES =================
+
+// Restore mobile drawer while keeping Owner month controls.
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+
+        <div class="role-chip">
+          ${esc(profile?.full_name||profile?.email||'')}
+          <small>${role}</small>
+        </div>
+
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              ${isOwner()?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${ctMonthPickerHtml()}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
+
+// Restore repeat controls in normal Add Class.
+function classModal(){
+  modal('Add class',classForm());
+  setTimeout(()=>toggleClassRepeatControls(),0);
+}
+
+
+// Dashboard: monthly figures + original alerts/revenue mix/today classes.
+function dashboard(){
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date)&&!c.cancelled);
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const checked=monthClasses.reduce((a,c)=>a+classCheckedInCount(c),0);
+  const cap=monthClasses.reduce((a,c)=>a+Number(c.capacity||0),0);
+  const occ=cap?Math.round(checked/cap*100):0;
+
+  const scopeRevenue=(scope)=>monthSales.reduce((sum,s)=>{
+    return sum+saleItems(s).reduce((a,i)=>{
+      if(i.kind!=='membership')return a;
+      const m=db.memberships.find(x=>String(x.id)===String(i.id));
+      return a+((m?.studio_scope||'Both')===scope?Number(i.price||0):0);
+    },0);
+  },0);
+
+  layout(`
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+      <div class="card kpi"><div class="label">Occupancy</div><div class="value">${occ}%</div></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid three">
+      <div class="card">
+        <h3>Studio alerts</h3>
+        ${alertRow('Pending payments','pending')}
+        ${alertRow('Clients with ≤1 session','low_sessions')}
+        ${alertRow('Packages expiring in 7 days','expiring')}
+        ${alertRow('Low-stock products','low_stock')}
+        ${alertRow('Classes without instructor','unassigned')}
+        ${alertRow('Zero-attendance past classes','zero_attendance')}
+        ${alertRow('Waitlisted bookings','waitlist')}
+      </div>
+
+      <div class="card">
+        <h3>Revenue mix · ${esc(ctOwnerMonthLabel())}</h3>
+        <div class="cart-row"><span>Pilates</span><b>${money(scopeRevenue('Pilates'))}</b></div>
+        <div class="cart-row"><span>Megacore</span><b>${money(scopeRevenue('Megacore'))}</b></div>
+        <div class="cart-row"><span>Mix packages</span><b>${money(scopeRevenue('Both'))}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${monthClasses.length}</b></div>
+        <div class="cart-row"><span>Checked in</span><b>${checked}</b></div>
+        <div class="cart-row"><span>Sales</span><b>${monthSales.length}</b></div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>Today's classes</h3>
+      ${db.classes.filter(c=>c.class_date===today()&&!c.cancelled).map(classCard).join('')||'<div class="empty">No classes today.</div>'}
+    </div>
+  `,'Dashboard',`${ctOwnerMonthLabel()} performance, alerts and today's operations`);
+}
+
+
+// Finance: restore Pending Orders + End-of-Day Reconciliation; payment history remains month-filtered.
+function finance(){
+  const active=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const expRows=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+  const rev=active.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=expRows.reduce((a,e)=>a+Number(e.amount||0),0);
+  const pending=db.package_orders.filter(o=>o.status==='pending');
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi"><div class="label">Revenue</div><div class="value">${money(rev)}</div></div>
+      <div class="card kpi"><div class="label">Expenses</div><div class="value">${money(exp)}</div></div>
+      <div class="card kpi"><div class="label">Profit</div><div class="value">${money(rev-exp)}</div></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>Pending package orders</h3>
+      ${pending.length?pending.map(o=>{
+        const c=db.clients.find(x=>String(x.id)===String(o.client_id));
+        const m=db.memberships.find(x=>String(x.id)===String(o.membership_id));
+        return `
+          <div class="booking-person">
+            <span>
+              <b>${esc(c?.name||'Client')}</b>
+              <small>${esc(m?.name||'Package')} · ${money(o.amount)}${o.coupon_code?` · Coupon ${esc(o.coupon_code)}`:''} · Payment Pending</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change Package</button>
+              <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button>
+              <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button>
+            </span>
+          </div>`;
+      }).join(''):'<div class="empty">No pending package orders.</div>'}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3>End-of-day reconciliation</h3>
+      <div class="toolbar">
+        <input id="reconDate" type="date" value="${today()}" onchange="renderReconciliation()">
+        <button class="btn" onclick="renderReconciliation()">Refresh</button>
+      </div>
+      <div id="reconBox"></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">Payment history · ${esc(ctOwnerMonthLabel())}</h3>
+        <input id="paymentHistorySearch" placeholder="Search client, item or payment method…" oninput="renderPaymentHistory(this.value)" style="max-width:340px">
+      </div>
+      <div id="paymentHistoryRows"></div>
+    </div>
+  `,'Finance',`${ctOwnerMonthLabel()} payments, corrections and reconciliation`);
+
+  renderReconciliation();
+  renderPaymentHistory('');
+}
+
+
+// Operations: restore all original sections + monthly totals.
+function operations(){
+  const monthClasses=db.classes.filter(c=>ctInOwnerMonth(c.class_date));
+  const activeClasses=monthClasses.filter(c=>!c.cancelled);
+  const monthSales=salesActive().filter(s=>ctInOwnerMonth(s.created_at));
+  const monthExpenses=db.expenses.filter(e=>ctInOwnerMonth(e.expense_date));
+
+  const rev=monthSales.reduce((a,s)=>a+Number(s.total||0),0);
+  const exp=monthExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+
+  const birthdays=db.clients.filter(c=>
+    c.birthday &&
+    String(c.birthday).slice(5,7)===String(Number(ownerMonth.split('-')[1])).padStart(2,'0')
+  );
+
+  const birthdayUsed=db.client_rewards.filter(r=>
+    r.reward_type==='birthday' &&
+    r.status==='used' &&
+    Number(r.issued_year)===Number(ownerMonth.split('-')[0])
+  ).length;
+
+  const events=(db.studio_events||[]).filter(e=>!e.archived_at);
+  const promos=(db.promo_codes||[]).filter(p=>!p.archived_at);
+  const announcements=(db.announcements||[]).filter(a=>!a.archived_at);
+
+  layout(`
+    <div class="grid two">
+
+      <div class="card">
+        <h3>Studio alerts</h3>
+        ${alertRow('Pending payments','pending')}
+        ${alertRow('Clients with ≤1 session','low_sessions')}
+        ${alertRow('Packages expiring in 7 days','expiring')}
+        ${alertRow('Low-stock products','low_stock')}
+        ${alertRow('Classes without instructor','unassigned')}
+        ${alertRow('Zero-attendance past classes','zero_attendance')}
+        ${alertRow('Waitlisted bookings','waitlist')}
+      </div>
+
+      <div class="card">
+        <h3>Monthly totals</h3>
+        <div class="cart-row"><span>Classes</span><b>${activeClasses.length}</b></div>
+        <div class="cart-row"><span>Revenue</span><b>${money(rev)}</b></div>
+        <div class="cart-row"><span>Expenses</span><b>${money(exp)}</b></div>
+        <div class="cart-row"><span>Profit</span><b>${money(rev-exp)}</b></div>
+      </div>
+
+      <div class="card">
+        <h3>Birthdays · ${esc(ctOwnerMonthLabel())}</h3>
+        <div class="cart-row"><span>Birthdays</span><b>${birthdays.length}</b></div>
+        <div class="cart-row"><span>Birthday gifts used this year</span><b>${birthdayUsed}</b></div>
+        ${birthdays.slice(0,12).map(c=>`
+          <div class="cart-row">
+            <span>${esc(c.name)}</span>
+            <small>${esc(String(c.birthday).slice(5))}</small>
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h3>Events & Specials</h3>
+        <div class="toolbar"><button class="btn primary" onclick="eventModal()">+ Event</button></div>
+        ${events.map(e=>{
+          const p=eventPerformance(e);
+          return `
+            <div class="cart-row">
+              <span>
+                <b>${esc(e.title)}</b>
+                <small>${esc(e.start_date)} → ${esc(e.end_date)} · ${esc(e.studio_scope)} · ${e.active?'Active':'Inactive'}</small>
+                <small>Booked guests: ${p.booked} · Checked in: ${p.checked} · Converted: ${p.converted}</small>
+              </span>
+              <span>
+                <button class="btn small" onclick="eventModal('${e.id}')">Edit</button>
+                <button class="btn small" onclick="toggleEvent('${e.id}',${e.active?'false':'true'})">${e.active?'Deactivate':'Activate'}</button>
+                <button class="btn small danger" onclick="archiveRecord('studio_events','${e.id}')">Archive</button>
+              </span>
+            </div>`;
+        }).join('')||'<div class="empty">No events yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Promo codes</h3>
+        <div class="toolbar"><button class="btn primary" onclick="promoModal()">+ Promo code</button></div>
+        ${promos.map(p=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(p.code)}</b>
+              <small>${p.discount_type==='fixed'?money(p.discount_value):`${p.discount_value??p.discount_percent}% off`} · ${p.one_use_per_client!==false?'One use/client':'Repeat allowed'} · ${p.active?'Active':'Inactive'}</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="promoModal('${p.id}')">Edit</button>
+              <button class="btn small" onclick="togglePromo('${p.id}',${p.active?'false':'true'})">${p.active?'Deactivate':'Activate'}</button>
+              <button class="btn small danger" onclick="archiveRecord('promo_codes','${p.id}')">Archive</button>
+            </span>
+          </div>`).join('')||'<div class="empty">No promo codes.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Announcements</h3>
+        <div class="toolbar"><button class="btn primary" onclick="announcementModal()">+ Announcement</button></div>
+        ${announcements.map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.title)}</b>
+              <small>${esc(a.message)} · ${esc(a.audience||'Everyone')} · ${a.active===false?'Inactive':'Active'}</small>
+            </span>
+            <span>
+              <button class="btn small" onclick="announcementModal('${a.id}')">Edit</button>
+              <button class="btn small" onclick="toggleAnnouncement('${a.id}',${a.active===false?'true':'false'})">${a.active===false?'Activate':'Deactivate'}</button>
+              <button class="btn small danger" onclick="removeItem('announcements','${a.id}')">Delete</button>
+            </span>
+          </div>`).join('')||'<div class="empty">No announcements.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Reports & backup</h3>
+        <div class="cart-row"><span>Monthly classes</span><b>${activeClasses.length}</b></div>
+        <div class="toolbar">
+          <input id="reportFrom" type="date" value="${ownerMonth}-01">
+          <input id="reportTo" type="date" value="${dateISO(new Date(Number(ownerMonth.split('-')[0]),Number(ownerMonth.split('-')[1]),0))}">
+          <button class="btn" onclick="exportDateRangeReport()">Export date-range CSV</button>
+          <button class="btn" onclick="exportData()">Full backup JSON</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Audit log</h3>
+        ${db.audit_log.slice(-30).reverse().map(a=>`
+          <div class="cart-row">
+            <span>
+              <b>${esc(a.action)}</b>
+              <small>${esc(a.details||'')} · ${new Date(a.created_at).toLocaleString()}</small>
+            </span>
+          </div>`).join('')||'<div class="empty">Activity will appear here.</div>'}
+      </div>
+
+    </div>
+  `,'Operations',`${ctOwnerMonthLabel()} alerts, events, promos, announcements and reports`);
+}
+
+
+
+// ================= CORE THEORY — MONTH SELECTOR ONLY WHERE RELEVANT =================
+
+function ctPageUsesMonthSelector(){
+  if(!isOwner()) return false;
+
+  // Month-based reporting / management pages only.
+  return ['dashboard','finance','expenses','operations','team','reports'].includes(page);
+}
+
+function layout(content,title,subtitle=''){
+  const role=isOwner()?'Owner':isInstructor()?'Instructor':isReceptionist()?'Receptionist':'Client';
+  const showMonth=ctPageUsesMonthSelector();
+
+  $("#app").innerHTML=`
+    <div class="app">
+      <div class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
+
+      <aside class="sidebar">
+        <div class="mobile-drawer-head">
+          <div class="drawer-wordmark" aria-label="Core Theory">
+            <div class="drawer-wordmark-core">CORE</div>
+            <div class="drawer-wordmark-theory">THEORY</div>
+          </div>
+          <button class="drawer-close" type="button" aria-label="Close menu" onclick="closeMobileMenu()">×</button>
+        </div>
+
+        <div class="brand desktop-brand">CORE THEORY<small>${role} Portal</small></div>
+        <div class="mobile-role-label">${role} Portal</div>
+        <div class="nav">${nav()}</div>
+
+        <div class="role-chip">
+          ${esc(profile?.full_name||profile?.email||'')}
+          <small>${role}</small>
+        </div>
+
+        <button class="btn logout" onclick="logout()">Log out</button>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="mobile-title-row">
+            <button class="mobile-menu-button" type="button" aria-label="Open menu" onclick="toggleMobileMenu()">☰</button>
+
+            <div>
+              <h1>${title}</h1>
+              <p>${subtitle}</p>
+              ${showMonth?`<div class="muted" style="margin-top:4px"><b>${esc(ctOwnerMonthLabel())}</b></div>`:''}
+              <div class="sync-note">☁ Cloud connected</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${showMonth?ctMonthPickerHtml():''}
+            <button class="btn" onclick="loadAll()">Refresh</button>
+          </div>
+        </div>
+
+        ${activeAnnouncementBanners()}
+        ${content}
+      </main>
+    </div>`;
+
+  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{
+    page=b.dataset.page;
+    closeMobileMenu();
+    render();
+  });
+
+  document.querySelectorAll('[data-custom]').forEach(b=>b.onclick=()=>{
+    page='custom:'+b.dataset.custom;
+    closeMobileMenu();
+    render();
+  });
+}
+
+
+
+// ================= CORE THEORY — VARIANT-SPECIFIC COST & PRICE =================
+
+function ctVariantRowsText(productId){
+  return ctProductVariants(productId)
+    .map(v=>{
+      const cost = v.cost_override==null ? '' : Number(v.cost_override);
+      const price = v.price_override==null ? '' : Number(v.price_override);
+      return `${v.variant_name} | ${Number(v.stock||0)} | ${cost} | ${price}`;
+    })
+    .join('\n');
+}
+
+function productModal(p=null){
+  const editing=!!p;
+  const variantType=p?.variant_type||'';
+
+  modal(editing?'Edit product':'Add product',`
+    <div class="form">
+      <div>
+        <label>Name</label>
+        <input id="pname" value="${esc(p?.name||'')}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <input id="pcat" value="${esc(p?.category||'Retail')}">
+      </div>
+
+      <div>
+        <label>Base cost</label>
+        <input id="pcost" type="number" step=".01" value="${p?.cost??''}">
+      </div>
+
+      <div>
+        <label>Base sell price</label>
+        <input id="pprice" type="number" step=".01" value="${p?.price??''}">
+      </div>
+
+      <div>
+        <label>Low stock</label>
+        <input id="pmin" type="number" value="${p?.minimum_stock??5}">
+      </div>
+
+      <div>
+        <label>Variant type</label>
+        <select id="pvarianttype" onchange="ctToggleVariantEditor()">
+          <option value="" ${!variantType?'selected':''}>No variants</option>
+          <option value="Color" ${variantType==='Color'?'selected':''}>Color</option>
+          <option value="Flavor" ${variantType==='Flavor'?'selected':''}>Flavor</option>
+          <option value="Size" ${variantType==='Size'?'selected':''}>Size</option>
+          <option value="Style" ${variantType==='Style'?'selected':''}>Style</option>
+          <option value="Other" ${variantType==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+
+      <div class="full" id="ctVariantEditor" style="${variantType?'':'display:none'}">
+        <label>Variants</label>
+        <textarea id="pvariants" rows="10" placeholder="Small | 5 | 8 | 15
+Medium | 4 | 10 | 18
+Large | 3 | 12 | 22">${editing?esc(ctVariantRowsText(p.id)):''}</textarea>
+        <small class="muted">
+          One option per line: <b>Name | Stock | Cost | Sell Price</b><br>
+          For variants that use the base product cost/price, you can leave Cost and Sell Price blank.
+        </small>
+      </div>
+
+      <div class="full">
+        <div class="notice card" style="margin:0">
+          <b>How pricing works</b>
+          <p class="muted" style="margin:4px 0 0">
+            A size can have its own cost and sell price. If a variant price is blank, Core Theory uses the product's base cost/price.
+          </p>
+        </div>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">
+          ${editing?'Save changes':'Save product'}
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctParseVariants(){
+  const type=$("#pvarianttype")?.value||'';
+  if(!type)return {type:'',rows:[],errors:[]};
+
+  const raw=$("#pvariants")?.value||'';
+  const rows=[];
+  const errors=[];
+
+  raw.split(/\r?\n/).forEach((line,i)=>{
+    const x=line.trim();
+    if(!x)return;
+
+    const parts=x.split('|').map(v=>v.trim());
+    if(parts.length<2 || parts.length>4){
+      errors.push(`Line ${i+1}: use Name | Stock | Cost | Sell Price`);
+      return;
+    }
+
+    const name=parts[0];
+    const stock=Number(parts[1]);
+    const costRaw=parts.length>=3?parts[2]:'';
+    const priceRaw=parts.length>=4?parts[3]:'';
+
+    if(!name){
+      errors.push(`Line ${i+1}: variant name is missing.`);
+      return;
+    }
+
+    if(!Number.isInteger(stock)||stock<0){
+      errors.push(`Line ${i+1}: stock must be 0 or a whole number.`);
+      return;
+    }
+
+    const cost=costRaw===''?null:Number(costRaw);
+    const price=priceRaw===''?null:Number(priceRaw);
+
+    if(cost!==null && (!Number.isFinite(cost)||cost<0)){
+      errors.push(`Line ${i+1}: cost must be blank or a valid number.`);
+      return;
+    }
+
+    if(price!==null && (!Number.isFinite(price)||price<0)){
+      errors.push(`Line ${i+1}: sell price must be blank or a valid number.`);
+      return;
+    }
+
+    rows.push({
+      variant_name:name,
+      stock,
+      cost_override:cost,
+      price_override:price
+    });
+  });
+
+  return {type,rows,errors};
+}
+
+async function ctSaveProductVariants(productId,variantType,rows){
+  const {error:delError}=await sb.from('product_variants').delete().eq('product_id',productId);
+  if(delError)return delError;
+
+  if(rows.length){
+    const {error:insError}=await sb.from('product_variants').insert(
+      rows.map(r=>({
+        product_id:productId,
+        variant_name:r.variant_name,
+        stock:r.stock,
+        cost_override:r.cost_override,
+        price_override:r.price_override,
+        active:true
+      }))
+    );
+    if(insError)return insError;
+  }
+
+  const total=rows.reduce((a,r)=>a+Number(r.stock||0),0);
+  const {error:updateError}=await sb.from('products')
+    .update({
+      variant_type:variantType||null,
+      stock:variantType?total:Number($("#pstock")?.value||0)
+    })
+    .eq('id',productId);
+
+  return updateError||null;
+}
+
+function inventory(){
+  const rows=db.products||[];
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="productModal()">+ Add product</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variants</th>
+            <th>Base cost</th>
+            <th>Base sell</th>
+            <th>Total stock</th>
+            <th>Low stock</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows.map(p=>{
+            const variants=ctProductVariants(p.id);
+            return `
+              <tr>
+                <td>
+                  <b>${esc(p.name)}</b>
+                  <div class="muted">${esc(p.category||'')}</div>
+                </td>
+
+                <td>
+                  ${variants.length
+                    ? `<b>${esc(ctVariantLabel(p))}</b><br>
+                       ${variants.map(v=>{
+                         const cost=v.cost_override==null?Number(p.cost||0):Number(v.cost_override);
+                         const price=v.price_override==null?Number(p.price||0):Number(v.price_override);
+                         return `<div style="margin:4px 0">
+                           <span class="badge">${esc(v.variant_name)} · Stock ${Number(v.stock||0)}</span>
+                           <small class="muted"> Cost ${money(cost)} · Sell ${money(price)}</small>
+                         </div>`;
+                       }).join('')}`
+                    : '<span class="muted">—</span>'}
+                </td>
+
+                <td>${money(p.cost)}</td>
+                <td>${money(p.price)}</td>
+                <td>${Number(p.stock||0)}</td>
+                <td>${p.minimum_stock??0}</td>
+
+                <td>
+                  <button class="btn small" onclick="editProduct('${p.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `,'Inventory','Products, variants, stock, cost and selling price');
+}
+
+function ctChooseProductVariant(product){
+  const variants=ctProductVariants(product.id).filter(v=>Number(v.stock||0)>0);
+  if(!variants.length)return alert(`No ${ctVariantLabel(product).toLowerCase()} options are in stock.`);
+
+  modal(`Choose ${esc(ctVariantLabel(product))}`,`
+    <p><b>${esc(product.name)}</b></p>
+    <div style="display:grid;gap:8px">
+      ${variants.map(v=>{
+        const price=v.price_override==null?Number(product.price||0):Number(v.price_override);
+        return `
+          <button class="btn" onclick="ctAddVariantToCart('${product.id}','${v.id}')">
+            <b>${esc(v.variant_name)}</b>
+            <span class="muted"> · ${money(price)} · ${Number(v.stock||0)} in stock</span>
+          </button>`;
+      }).join('')}
+    </div>
+  `);
+}
+
+function ctAddVariantToCart(productId,variantId){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const p=products.find(x=>String(x.id)===String(productId));
+  const v=(db.product_variants||[]).find(x=>String(x.id)===String(variantId));
+
+  if(!p||!v)return alert('Variant not found. Refresh and try again.');
+  if(Number(v.stock||0)<=0)return alert('This option is out of stock.');
+
+  const variantPrice=v.price_override==null?Number(p.price||0):Number(v.price_override);
+  const variantCost=v.cost_override==null?Number(p.cost||0):Number(v.cost_override);
+
+  cart.push({
+    ...p,
+    kind:'product',
+    variant_id:v.id,
+    variant_name:v.variant_name,
+    name:`${p.name} · ${v.variant_name}`,
+    price:variantPrice,
+    cost:variantCost
+  });
+
+  $("#modal")?.remove();
+  posPromo=null;
+  pos();
+}
+
+
+
+// ================= CORE THEORY — VARIANT PRICE/COST ONLY FOR SIZE =================
+
+function ctVariantRowsText(productId){
+  const product=(db.products||[]).find(p=>String(p.id)===String(productId));
+  const isSize=product?.variant_type==='Size';
+
+  return ctProductVariants(productId)
+    .map(v=>{
+      if(isSize){
+        const cost=v.cost_override==null?'':Number(v.cost_override);
+        const price=v.price_override==null?'':Number(v.price_override);
+        return `${v.variant_name} | ${Number(v.stock||0)} | ${cost} | ${price}`;
+      }
+      return `${v.variant_name} | ${Number(v.stock||0)}`;
+    })
+    .join('\n');
+}
+
+function productModal(p=null){
+  const editing=!!p;
+  const variantType=p?.variant_type||'';
+  const sizeMode=variantType==='Size';
+
+  modal(editing?'Edit product':'Add product',`
+    <div class="form">
+      <div>
+        <label>Name</label>
+        <input id="pname" value="${esc(p?.name||'')}">
+      </div>
+
+      <div>
+        <label>Category</label>
+        <input id="pcat" value="${esc(p?.category||'Retail')}">
+      </div>
+
+      <div>
+        <label>Base cost</label>
+        <input id="pcost" type="number" step=".01" value="${p?.cost??''}">
+      </div>
+
+      <div>
+        <label>Base sell price</label>
+        <input id="pprice" type="number" step=".01" value="${p?.price??''}">
+      </div>
+
+      <div>
+        <label>Low stock</label>
+        <input id="pmin" type="number" value="${p?.minimum_stock??5}">
+      </div>
+
+      <div>
+        <label>Variant type</label>
+        <select id="pvarianttype" onchange="ctToggleVariantEditor();ctRefreshVariantHelp()">
+          <option value="" ${!variantType?'selected':''}>No variants</option>
+          <option value="Color" ${variantType==='Color'?'selected':''}>Color</option>
+          <option value="Flavor" ${variantType==='Flavor'?'selected':''}>Flavor</option>
+          <option value="Size" ${variantType==='Size'?'selected':''}>Size</option>
+          <option value="Style" ${variantType==='Style'?'selected':''}>Style</option>
+          <option value="Other" ${variantType==='Other'?'selected':''}>Other</option>
+        </select>
+      </div>
+
+      <div class="full" id="ctVariantEditor" style="${variantType?'':'display:none'}">
+        <label>Variants</label>
+        <textarea id="pvariants" rows="10" placeholder="${sizeMode
+          ? 'Small | 5 | 8 | 15\\nMedium | 4 | 10 | 18\\nLarge | 3 | 12 | 22'
+          : 'Black | 5\\nBurgundy | 4\\nGrey | 3'}">${editing?esc(ctVariantRowsText(p.id)):''}</textarea>
+
+        <small class="muted" id="ctVariantHelp">
+          ${sizeMode
+            ? 'For Size: <b>Name | Stock | Cost | Sell Price</b>'
+            : 'For Color / Flavor / Style / Other: <b>Name | Stock</b>'}
+        </small>
+      </div>
+
+      <div class="full">
+        <div class="notice card" style="margin:0">
+          <b>Pricing rule</b>
+          <p class="muted" style="margin:4px 0 0">
+            Only <b>Size</b> variants can have their own cost and sell price.
+            Color, Flavor, Style and Other use the product's base cost and base sell price.
+          </p>
+        </div>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" onclick="${editing?`saveProduct('${p.id}')`:'addProduct()'}">
+          ${editing?'Save changes':'Save product'}
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctRefreshVariantHelp(){
+  const type=$("#pvarianttype")?.value||'';
+  const area=$("#pvariants");
+  const help=$("#ctVariantHelp");
+  if(!area||!help)return;
+
+  if(type==='Size'){
+    area.placeholder='Small | 5 | 8 | 15\nMedium | 4 | 10 | 18\nLarge | 3 | 12 | 22';
+    help.innerHTML='For Size: <b>Name | Stock | Cost | Sell Price</b>';
+  }else{
+    area.placeholder='Black | 5\nBurgundy | 4\nGrey | 3';
+    help.innerHTML='For Color / Flavor / Style / Other: <b>Name | Stock</b>';
+  }
+}
+
+function ctParseVariants(){
+  const type=$("#pvarianttype")?.value||'';
+  if(!type)return {type:'',rows:[],errors:[]};
+
+  const raw=$("#pvariants")?.value||'';
+  const rows=[];
+  const errors=[];
+  const isSize=type==='Size';
+
+  raw.split(/\r?\n/).forEach((line,i)=>{
+    const x=line.trim();
+    if(!x)return;
+
+    const parts=x.split('|').map(v=>v.trim());
+
+    if(isSize){
+      if(parts.length!==4){
+        errors.push(`Line ${i+1}: Size must use Name | Stock | Cost | Sell Price`);
+        return;
+      }
+    }else{
+      if(parts.length!==2){
+        errors.push(`Line ${i+1}: ${type} must use Name | Stock`);
+        return;
+      }
+    }
+
+    const name=parts[0];
+    const stock=Number(parts[1]);
+
+    if(!name){
+      errors.push(`Line ${i+1}: variant name is missing.`);
+      return;
+    }
+
+    if(!Number.isInteger(stock)||stock<0){
+      errors.push(`Line ${i+1}: stock must be 0 or a whole number.`);
+      return;
+    }
+
+    let cost=null, price=null;
+
+    if(isSize){
+      cost=Number(parts[2]);
+      price=Number(parts[3]);
+
+      if(!Number.isFinite(cost)||cost<0){
+        errors.push(`Line ${i+1}: size cost must be a valid number.`);
+        return;
+      }
+
+      if(!Number.isFinite(price)||price<0){
+        errors.push(`Line ${i+1}: size sell price must be a valid number.`);
+        return;
+      }
+    }
+
+    rows.push({
+      variant_name:name,
+      stock,
+      cost_override:cost,
+      price_override:price
+    });
+  });
+
+  return {type,rows,errors};
+}
+
+function inventory(){
+  const rows=db.products||[];
+
+  layout(`
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn primary" onclick="productModal()">+ Add product</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variants</th>
+            <th>Base cost</th>
+            <th>Base sell</th>
+            <th>Total stock</th>
+            <th>Low stock</th>
+            <th></th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows.map(p=>{
+            const variants=ctProductVariants(p.id);
+            const isSize=p.variant_type==='Size';
+
+            return `
+              <tr>
+                <td>
+                  <b>${esc(p.name)}</b>
+                  <div class="muted">${esc(p.category||'')}</div>
+                </td>
+
+                <td>
+                  ${variants.length
+                    ? `<b>${esc(ctVariantLabel(p))}</b><br>
+                       ${variants.map(v=>{
+                         if(isSize){
+                           const cost=v.cost_override==null?Number(p.cost||0):Number(v.cost_override);
+                           const price=v.price_override==null?Number(p.price||0):Number(v.price_override);
+
+                           return `<div style="margin:4px 0">
+                             <span class="badge">${esc(v.variant_name)} · Stock ${Number(v.stock||0)}</span>
+                             <small class="muted"> Cost ${money(cost)} · Sell ${money(price)}</small>
+                           </div>`;
+                         }
+
+                         return `<div style="margin:4px 0">
+                           <span class="badge">${esc(v.variant_name)} · Stock ${Number(v.stock||0)}</span>
+                         </div>`;
+                       }).join('')}`
+                    : '<span class="muted">—</span>'}
+                </td>
+
+                <td>${money(p.cost)}</td>
+                <td>${money(p.price)}</td>
+                <td>${Number(p.stock||0)}</td>
+                <td>${p.minimum_stock??0}</td>
+
+                <td>
+                  <button class="btn small" onclick="editProduct('${p.id}')">Edit</button>
+                  <button class="btn small danger" onclick="removeItem('products','${p.id}')">Delete</button>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `,'Inventory','Products, variants and stock');
+}
+
+function ctChooseProductVariant(product){
+  const variants=ctProductVariants(product.id).filter(v=>Number(v.stock||0)>0);
+  if(!variants.length)return alert(`No ${ctVariantLabel(product).toLowerCase()} options are in stock.`);
+
+  const isSize=product.variant_type==='Size';
+
+  modal(`Choose ${esc(ctVariantLabel(product))}`,`
+    <p><b>${esc(product.name)}</b></p>
+    <div style="display:grid;gap:8px">
+      ${variants.map(v=>{
+        const price=isSize && v.price_override!=null
+          ?Number(v.price_override)
+          :Number(product.price||0);
+
+        return `
+          <button class="btn" onclick="ctAddVariantToCart('${product.id}','${v.id}')">
+            <b>${esc(v.variant_name)}</b>
+            <span class="muted"> · ${money(price)} · ${Number(v.stock||0)} in stock</span>
+          </button>`;
+      }).join('')}
+    </div>
+  `);
+}
+
+function ctAddVariantToCart(productId,variantId){
+  const products=isOwner()?db.products:(db.frontDeskProducts||[]);
+  const p=products.find(x=>String(x.id)===String(productId));
+  const v=(db.product_variants||[]).find(x=>String(x.id)===String(variantId));
+
+  if(!p||!v)return alert('Variant not found. Refresh and try again.');
+  if(Number(v.stock||0)<=0)return alert('This option is out of stock.');
+
+  const isSize=p.variant_type==='Size';
+
+  const finalPrice=isSize && v.price_override!=null
+    ?Number(v.price_override)
+    :Number(p.price||0);
+
+  const finalCost=isSize && v.cost_override!=null
+    ?Number(v.cost_override)
+    :Number(p.cost||0);
+
+  cart.push({
+    ...p,
+    kind:'product',
+    variant_id:v.id,
+    variant_name:v.variant_name,
+    name:`${p.name} · ${v.variant_name}`,
+    price:finalPrice,
+    cost:finalCost
+  });
+
+  $("#modal")?.remove();
+  posPromo=null;
+  pos();
+}
+
+
+
+// ================= CORE THEORY — ADD PACKAGE: PAID / COMPLIMENTARY / PAYMENT PENDING =================
+
+function sellMembership(cid){
+  const memberships=packageSortForClient(db.memberships||[]);
+  modal('Add package',`
+    <div class="form">
+      <div class="full">
+        <label>Package</label>
+        <select id="smid">
+          ${memberships.map(m=>`
+            <option value="${m.id}">
+              ${esc(packageDisplayName(m))}
+            </option>`).join('')}
+        </select>
+      </div>
+
+      <div class="full">
+        <label>How should this package be added?</label>
+
+        <div style="display:grid;gap:8px">
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="paid" checked onchange="ctPackagePaymentChoiceChanged()">
+            <b> Paid</b>
+            <div class="muted">Collect payment now, record revenue, and activate / queue the package.</div>
+          </label>
+
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="complimentary" onchange="ctPackagePaymentChoiceChanged()">
+            <b> Complimentary</b>
+            <div class="muted">Give the package for free. No revenue is recorded.</div>
+          </label>
+
+          <label class="card" style="cursor:pointer;margin:0">
+            <input type="radio" name="ctPackagePaymentStatus" value="pending" onchange="ctPackagePaymentChoiceChanged()">
+            <b> Payment Pending</b>
+            <div class="muted">Do not activate it yet. It appears in Pending Package Orders until payment is collected.</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="full" id="ctPaidMethodBox">
+        <label>Payment method</label>
+        <select id="ctPaidMethod">
+          <option>Cash</option>
+          <option>Card</option>
+          <option>Whish</option>
+          <option>Transfer</option>
+        </select>
+      </div>
+
+      <div class="full">
+        <button class="btn primary" id="ctAddPackageBtn" onclick="confirmMembership('${cid}')">
+          Add package
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function ctPackagePaymentChoiceChanged(){
+  const choice=document.querySelector('input[name="ctPackagePaymentStatus"]:checked')?.value||'paid';
+  const box=$("#ctPaidMethodBox");
+  if(box)box.style.display=choice==='paid'?'block':'none';
+}
+
+async function confirmMembership(cid){
+  const membershipId=$("#smid")?.value;
+  const m=db.memberships.find(x=>String(x.id)===String(membershipId));
+  if(!m)return alert('Choose a package.');
+
+  const choice=document.querySelector('input[name="ctPackagePaymentStatus"]:checked')?.value||'paid';
+  const btn=$("#ctAddPackageBtn");
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Processing…';
+  }
+
+  if(choice==='paid'){
+    const method=$("#ctPaidMethod")?.value||'Cash';
+
+    const {error}=await sb.rpc('complete_pos_sale',{
+      p_client_id:String(cid),
+      p_payment_method:method,
+      p_items:[{
+        id:String(m.id),
+        name:m.name,
+        price:Number(m.price||0),
+        kind:'membership'
+      }]
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Payment recorded and package added.');
+  }
+
+  if(choice==='complimentary'){
+    const ok=confirm(`Give ${m.name} to this client as a complimentary package?\n\nNo revenue will be recorded.`);
+    if(!ok){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return;
+    }
+
+    const {error}=await sb.rpc('owner_apply_membership',{
+      p_client_id:String(cid),
+      p_membership_id:String(m.id)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Complimentary package added. No revenue was recorded.');
+  }
+
+  if(choice==='pending'){
+    const {error}=await sb.rpc('owner_create_pending_package_order',{
+      p_client_id:String(cid),
+      p_membership_id:String(m.id)
+    });
+
+    if(error){
+      if(btn){btn.disabled=false;btn.textContent='Add package';}
+      return alert(error.message);
+    }
+
+    $("#modal")?.remove();
+    await loadAll();
+    clientProfile(cid,'packages');
+    return alert('Package marked Payment Pending. It has not been activated and no revenue was recorded.');
+  }
+}
+
+
+// Client profile: Pending orders now appear inside Packages as Payment Pending.
+function clientProfile(id,tab='overview'){
+  const c=db.clients.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  const bookings=db.bookings.filter(b=>String(b.client_id)===String(id));
+
+  const packages=db.client_packages
+    .filter(p=>String(p.client_id)===String(id))
+    .sort((a,b)=>String(b.purchased_at||'').localeCompare(String(a.purchased_at||'')));
+
+  const pendingOrders=(db.package_orders||[])
+    .filter(o=>String(o.client_id)===String(id)&&o.status==='pending')
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const payments=db.sales
+    .filter(s=>String(s.client_id)===String(id))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const notes=db.client_notes
+    .filter(n=>String(n.client_id)===String(id))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+
+  const visits=bookings.filter(b=>b.status==='checked_in').length;
+
+  const tabs=`
+    <div class="schedule-tabs">
+      <button class="tab ${tab==='overview'?'active':''}" onclick="clientProfile('${id}','overview')">Overview</button>
+      <button class="tab ${tab==='packages'?'active':''}" onclick="clientProfile('${id}','packages')">Packages</button>
+      <button class="tab ${tab==='attendance'?'active':''}" onclick="clientProfile('${id}','attendance')">Attendance</button>
+      <button class="tab ${tab==='payments'?'active':''}" onclick="clientProfile('${id}','payments')">Payments</button>
+      <button class="tab ${tab==='notes'?'active':''}" onclick="clientProfile('${id}','notes')">Notes</button>
+    </div>`;
+
+  let body='';
+
+  if(tab==='overview'){
+    body=`
+      <div class="grid two">
+        <div>
+          <p><b>Email:</b> ${esc(c.email||'—')}</p>
+          <p><b>Phone:</b> ${esc(c.phone||'—')}</p>
+          <p><b>Birthday:</b> ${esc(c.birthday||'—')}</p>
+          <p><b>Emergency:</b> ${esc(c.emergency_contact_name||'—')} ${esc(c.emergency_contact_phone||'')}</p>
+          <p><b>Waiver:</b> ${c.waiver_accepted_at?'Accepted '+new Date(c.waiver_accepted_at).toLocaleDateString():'Not recorded'}</p>
+        </div>
+        <div>
+          <p><b>Current package:</b> ${esc(c.package||'—')}</p>
+          <p><b>Sessions:</b> ${c.sessions??0}</p>
+          <p><b>Expiry:</b> ${esc(c.expiry||'—')}</p>
+          <p><b>Total visits:</b> ${visits}</p>
+          <p><b>Payment pending:</b> ${pendingOrders.length}</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn" onclick="clientModal('${id}')">Edit client</button>
+        <button class="btn" onclick="sellMembership('${id}')">Add package</button>
+        <button class="btn" onclick="sessionAdjustmentModal('${id}')">Adjust sessions</button>
+        <button class="btn" onclick="freezeClientModal('${id}')">Freeze</button>
+      </div>`;
+  }
+
+  if(tab==='packages'){
+    const pendingHtml=pendingOrders.map(o=>{
+      const m=db.memberships.find(x=>String(x.id)===String(o.membership_id));
+      return `
+        <div class="cart-row">
+          <span>
+            <b>${esc(m?.name||'Package')}</b>
+            <small>
+              <span class="badge warning">Payment Pending</span>
+              · ${esc(m?.studio_scope||'Both')}
+              · ${m?.sessions===999?'Unlimited':`${m?.sessions??'—'} sessions`}
+            </small>
+          </span>
+          <span>
+            <b>${money(o.amount)}</b>
+            <button class="btn small primary" onclick="ownerCollectPendingPayment('${o.id}')">Collect Payment</button>
+            <button class="btn small" onclick="ownerChangePendingPackage('${o.id}')">Change</button>
+            <button class="btn small danger" onclick="ownerCancelPendingOrder('${o.id}')">Cancel</button>
+          </span>
+        </div>`;
+    }).join('');
+
+    const packageHtml=packages.map(p=>`
+      <div class="cart-row">
+        <span>
+          <b>${esc(p.package_name)}</b>
+          <small>
+            ${esc(p.status)}
+            · ${p.sessions_remaining===999?'Unlimited':p.sessions_remaining+' / '+p.sessions_total+' left'}
+            · ${esc(p.studio_scope||'Both')}
+            · ${p.expiry||'No expiry'}
+          </small>
+        </span>
+        <span>
+          ${p.price_paid!=null?money(p.price_paid):''}
+          ${p.status==='upcoming'&&p.sessions_remaining===p.sessions_total
+            ?` <button class="btn small" onclick="transferPackageModal('${p.id}')">Transfer</button>`
+            :''}
+        </span>
+      </div>`).join('');
+
+    body=(pendingHtml+packageHtml)||'<div class="empty">No package history.</div>';
+  }
+
+  if(tab==='attendance'){
+    body=bookings.map(b=>{
+      const cl=db.classes.find(x=>String(x.id)===String(b.class_id));
+      return `
+        <div class="cart-row">
+          <span>
+            <b>${esc(cl?.class_type||'Class')}</b>
+            <small>${esc(cl?.class_date||'')} · ${esc(cl?.studio_type||'')}</small>
+          </span>
+          <span class="badge">${esc(b.cancel_type||b.status)}</span>
+        </div>`;
+    }).join('')||'<div class="empty">No attendance history.</div>';
+  }
+
+  if(tab==='payments'){
+    body=payments.map(s=>`
+      <div class="cart-row">
+        <span>
+          <b>${esc(saleWhat(s))}</b>
+          <small>${new Date(s.created_at).toLocaleString()} · ${esc(s.payment_method||'')}${s.voided_at?' · VOIDED':''}</small>
+        </span>
+        <span>
+          <b>${money(s.total)}</b>
+          <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+        </span>
+      </div>`).join('')||'<div class="empty">No payment history.</div>';
+  }
+
+  if(tab==='notes'){
+    body=`
+      <div class="toolbar">
+        <button class="btn primary" onclick="clientNoteModal('${id}')">+ Add note</button>
+      </div>
+      ${notes.map(n=>`
+        <div class="cart-row">
+          <span>
+            <b>${esc(n.category)}</b>
+            ${n.teaching_visible?' <span class="badge">Instructor-visible</span>':''}
+            <small>${esc(n.note)}</small>
+            <small>${new Date(n.created_at).toLocaleString()}</small>
+          </span>
+          <button class="btn small danger" onclick="removeItem('client_notes','${n.id}')">Delete</button>
+        </div>`).join('')||'<div class="empty">No notes.</div>'}`;
+  }
+
+  modal(esc(c.name),tabs+`<div style="margin-top:14px">${body}</div>`);
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10 — FINAL STABLE OVERRIDES
+// ============================================================================
+
+const CORE_THEORY_VERSION='10.0';
+
+function ctPendingForClient(clientId){
+  return (db.package_orders||[]).find(o =>
+    String(o.client_id)===String(clientId) && o.status==='pending'
+  ) || null;
+}
+
+// ---------------- CLIENT PACKAGE PURCHASE = PAYMENT PENDING ----------------
+
+function packageRequestModal(id){
+  const m=db.memberships.find(x=>String(x.id)===String(id));
+  const c=myClient();
+  if(!m||!c)return;
+
+  const pending=ctPendingForClient(c.id);
+
+  modal(pending?'Change pending package':'Confirm package',`
+    ${packageSummaryHtml(m)}
+
+    ${pending?`
+      <div class="warning" style="margin-bottom:12px">
+        <b>You already have a Payment Pending package.</b>
+        <p>Choosing this package will replace your unpaid package choice.</p>
+      </div>
+    `:''}
+
+    <label>Coupon code <span class="muted">(optional)</span></label>
+    <input id="requestCoupon" placeholder="Enter coupon code">
+
+    <button class="btn primary full" onclick="requestPackage('${m.id}')">
+      ${pending?'Change pending package':'Request package'}
+    </button>
+
+    ${pending?`
+      <button class="btn danger full" onclick="clientCancelPendingPackage('${pending.id}')">
+        Cancel pending package
+      </button>
+    `:''}
+
+    <button class="btn full" onclick="$('#modal').remove()">Go back</button>
+
+    <p class="muted">
+      Package requests from a client account are always <b>Payment Pending</b>.
+      They do not activate and do not count as revenue until Core Theory collects payment.
+    </p>
+  `);
+}
+
+async function requestPackage(id){
+  const c=myClient();
+  if(!c)return alert('Client account not found.');
+
+  const code=($("#requestCoupon")?.value||'').trim();
+  const pending=ctPendingForClient(c.id);
+
+  if(pending){
+    const {error}=await sb.rpc('client_change_my_pending_package',{
+      p_order_id:String(pending.id),
+      p_membership_id:String(id)
+    });
+
+    if(error)return alert(error.message);
+
+    $("#modal")?.remove();
+    await loadAll();
+    page='packages';
+    packages();
+    return alert('Pending package changed. No payment was recorded.');
+  }
+
+  const {data,error}=await sb.rpc('request_package_order_v2',{
+    p_membership_id:String(id),
+    p_coupon_code:code||null
+  });
+
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='packages';
+  packages();
+
+  alert(
+    data?.discount_percent
+      ? `Package request sent. ${data.discount_percent}% promo applied. Payment is pending.`
+      : 'Package request sent. Payment is pending.'
+  );
+}
+
+async function clientCancelPendingPackage(orderId){
+  if(!confirm('Cancel this unpaid package request?'))return;
+
+  const {error}=await sb.rpc('client_cancel_my_pending_package',{
+    p_order_id:String(orderId)
+  });
+
+  if(error)return alert(error.message);
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='packages';
+  packages();
+  alert('Pending package cancelled.');
+}
+
+function packages(){
+  const c=myClient();
+  const scope=clientPackageTab;
+  const list=packageSortForClient(
+    db.memberships.filter(m=>(m.studio_scope||'Both')===scope)
+  );
+
+  const pending=ctPendingForClient(c?.id);
+  const pendingMembership=pending
+    ?db.memberships.find(m=>String(m.id)===String(pending.membership_id))
+    :null;
+
+  layout(`
+    ${pending?`
+      <div class="warning card" style="margin-bottom:14px">
+        <b>Payment Pending</b>
+        <p>
+          ${esc(pendingMembership?.name||'Package')} · ${money(pending.amount)}
+          ${pending.coupon_code?` · Promo ${esc(pending.coupon_code)}`:''}
+        </p>
+        <div class="toolbar">
+          <button class="btn danger" onclick="clientCancelPendingPackage('${pending.id}')">
+            Cancel request
+          </button>
+        </div>
+        <p class="muted">
+          This package is not active yet and no revenue has been recorded.
+        </p>
+      </div>
+    `:''}
+
+    <div class="schedule-tabs package-scope-tabs">
+      ${packageTabButton('Pilates','Pilates')}
+      ${packageTabButton('Megacore','Megacore')}
+      ${packageTabButton('Both','Mix')}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid three">
+      ${list.map(m=>`
+        <div class="card package-card">
+          <div class="toolbar">
+            <span class="badge">${esc(packageScopeLabel(m.studio_scope||'Both'))}</span>
+            ${m.is_private?'<span class="badge">Private</span>':''}
+          </div>
+          <h3>${esc(m.name)}</h3>
+          <div class="package-price">${money(m.price)}</div>
+          <p><b>${m.sessions===999?'Unlimited':m.sessions+' sessions'}</b> · ${m.validity_days} days</p>
+          <button class="btn primary" onclick="packageRequestModal('${m.id}')">
+            ${pending?'Choose instead':'Choose package'}
+          </button>
+        </div>
+      `).join('')||'<div class="card empty">No packages available.</div>'}
+    </div>
+
+    <div class="card notice">
+      <b>Pay at Core Theory</b>
+      <p>
+        Choosing a package creates a Payment Pending request.
+        It activates only after payment is collected.
+      </p>
+    </div>
+  `,
+  `Packages · ${scope==='Both'?'Mix':scope}`,
+  `Current package: ${esc(c?.package||'None')} · ${c?.sessions??0} sessions remaining`);
+}
+
+
+// ---------------- EXACT PRODUCT VARIANT ON SALE HISTORY / RECEIPT ----------------
+
+function v10SaleItemLabel(item){
+  const name=String(item?.name||item?.kind||'Item');
+  if(item?.variant_name && !name.includes(item.variant_name)){
+    return `${name} · ${item.variant_name}`;
+  }
+  return name;
+}
+
+function saleWhat(s){
+  if(s.description)return s.description;
+  const items=Array.isArray(s?.items)?s.items:[];
+  return items.map(v10SaleItemLabel).join(', ')||'Payment';
+}
+
+function printReceipt(id){
+  const s=db.sales.find(x=>String(x.id)===String(id));
+  if(!s)return;
+
+  const c=db.clients.find(x=>String(x.id)===String(s.client_id));
+  const w=window.open('','_blank','width=520,height=700');
+
+  if(!w)return alert('Allow pop-ups to print the receipt.');
+
+  const items=(Array.isArray(s.items)?s.items:[])
+    .map(i=>`<div class="row"><span>Item</span><b>${esc(v10SaleItemLabel(i))}</b></div>`)
+    .join('');
+
+  w.document.write(`
+    <html>
+      <head>
+        <title>Core Theory Receipt</title>
+        <style>
+          body{font-family:Arial;padding:32px;color:#222}
+          h1{letter-spacing:2px}
+          .row{display:flex;justify-content:space-between;gap:18px;border-bottom:1px solid #ddd;padding:9px 0}
+          .muted{color:#666}
+        </style>
+      </head>
+      <body>
+        <h1>CORE THEORY</h1>
+        <p class="muted">Payment receipt</p>
+        <div class="row"><span>Client</span><b>${esc(c?.name||'Walk-in')}</b></div>
+        ${items||`<div class="row"><span>Paid for</span><b>${esc(saleWhat(s))}</b></div>`}
+        <div class="row"><span>Amount</span><b>${money(s.total)}</b></div>
+        <div class="row"><span>Method</span><b>${esc(s.payment_method||'')}</b></div>
+        <div class="row"><span>Date</span><b>${new Date(s.created_at).toLocaleString()}</b></div>
+        ${s.voided_at?'<p><b>VOIDED / REFUNDED</b></p>':''}
+        <script>window.onload=()=>window.print()<\/script>
+      </body>
+    </html>
+  `);
+
+  w.document.close();
+}
+
+
+// ---------------- REFUND / CORRECTION ----------------
+
+function refundSaleModal(id){
+  const s=db.sales.find(x=>String(x.id)===String(id));
+  if(!s)return;
+  if(s.voided_at)return alert('This payment is already voided/refunded.');
+
+  modal('Refund payment',`
+    <div class="warning" style="margin-bottom:12px">
+      <b>Full refund</b>
+      <p>
+        Core Theory will reverse linked product stock and remove the sale from revenue.
+        If a linked package has already been used, the refund is blocked to protect sessions.
+      </p>
+    </div>
+
+    <p><b>${esc(saleClientName(s))}</b></p>
+    <p>${esc(saleWhat(s))} · ${money(s.total)}</p>
+
+    <label>Reason</label>
+    <textarea id="v10RefundReason" rows="4" placeholder="Reason for refund"></textarea>
+
+    <button class="btn danger full" id="v10RefundBtn" onclick="submitV10Refund('${s.id}')">
+      Confirm refund
+    </button>
+  `);
+}
+
+async function submitV10Refund(id){
+  const reason=$("#v10RefundReason")?.value.trim()||'';
+  if(!reason)return alert('Enter a refund reason.');
+  if(!confirm('Refund this transaction?'))return;
+
+  const btn=$("#v10RefundBtn");
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Processing…';
+  }
+
+  const {error}=await sb.rpc('v10_refund_sale',{
+    p_sale_id:String(id),
+    p_reason:reason
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Confirm refund';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  page='finance';
+  finance();
+  alert('Refund completed and kept in history.');
+}
+
+function renderPaymentHistory(query=''){
+  const box=$("#paymentHistoryRows");
+  if(!box)return;
+
+  const q=String(query||'').trim().toLowerCase();
+
+  const rows=[...db.sales]
+    .filter(s=>!isOwner()||!ownerMonth||ctInOwnerMonth(s.created_at))
+    .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))
+    .filter(s=>{
+      const hay=[saleClientName(s),saleWhat(s),s.payment_method,s.total,saleCollector(s)].join(' ').toLowerCase();
+      return !q||hay.includes(q);
+    });
+
+  box.innerHTML=rows.length?`
+    <div style="overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Date / time</th>
+            <th>Client</th>
+            <th>Paid for</th>
+            <th>Method</th>
+            <th>Amount</th>
+            <th>Recorded by</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s=>`
+            <tr>
+              <td>${s.created_at?new Date(s.created_at).toLocaleString():'—'}</td>
+              <td><b>${esc(saleClientName(s))}</b></td>
+              <td>${esc(saleWhat(s))}</td>
+              <td>${esc(s.payment_method||'—')}</td>
+              <td>
+                <b>${money(s.total)}</b>
+                ${s.voided_at?'<div class="muted">Voided / Refunded</div>':''}
+              </td>
+              <td>${esc(saleCollector(s))}</td>
+              <td>
+                <button class="btn small" onclick="printReceipt('${s.id}')">Receipt</button>
+                ${s.voided_at
+                  ?'<span class="badge">Voided / Refunded</span>'
+                  :`
+                    <button class="btn small" onclick="editSaleModal('${s.id}')">Correct</button>
+                    <button class="btn small danger" onclick="refundSaleModal('${s.id}')">Refund</button>
+                  `}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `:'<div class="empty">No sales in this month.</div>';
+}
+
+
+// ---------------- V10 STATUS HELPERS ----------------
+
+function v10PackageStatusLabel(status){
+  const s=String(status||'').toLowerCase();
+  const map={
+    pending:'Payment Pending',
+    active:'Active',
+    upcoming:'Upcoming',
+    expired:'Expired',
+    frozen:'Frozen',
+    used:'Used',
+    refunded:'Refunded',
+    cancelled:'Cancelled'
+  };
+  return map[s]||status||'—';
+}
+
+
+
+// ============================================================================
+// V10.0.1 BOOKING RPC COMPATIBILITY HOTFIX
+// Database currently exposes the 4-argument book_class_v3 RPC.
+// Keep V10 confirmation UI, but call the deployed RPC signature.
+// ============================================================================
+
+async function submitClientBooking(classId,choice,couponEncoded){
+  const coupon=decodeURIComponent(couponEncoded||'');
+  let membershipId=null,rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];
+  else if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking…';
+  }
+
+  const {data,error}=await sb.rpc('book_class_v3',{
+    p_class_id:String(classId),
+    p_membership_id:membershipId,
+    p_coupon_code:coupon||null,
+    p_reward_id:rewardId
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Confirm booking';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const status=data?.status||'booked';
+  const pay=data?.payment_status||'paid';
+
+  if(status==='waitlist'){
+    return alert(pay==='pending'
+      ?'Added to waitlist. Package payment is pending.'
+      :'Added to waitlist.');
+  }
+
+  if(rewardId)return alert('Booked with your free reward!');
+  if(membershipId && pay==='pending')return alert('Class booked. Package payment is pending.');
+  alert('Class booked.');
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.3 — OWNER BOOKINGS PAGE
+// ============================================================================
+
+let ownerBookingsFilter='upcoming';
+let ownerBookingsStudio='All';
+let ownerBookingsSearch='';
+
+function nav(){
+  const pages=isOwner()
+    ?['dashboard','clients','schedule','bookingsadmin','pos','memberships','inventory','expenses','finance','team','operations','settings']
+    :isInstructor()
+      ?['instructorhome','schedule',...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']
+      :isReceptionist()
+        ?[...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']
+        :['clienthome','book','mybookings','packages','clientaccount'];
+
+  const labels={
+    dashboard:'⌂ Dashboard',
+    instructorhome:'⌂ Home',
+    clienthome:'⌂ Home',
+    clients:'◎ Clients',
+    schedule:'□ Schedule',
+    bookingsadmin:'✓ Bookings',
+    pos:'$ POS / Sales',
+    memberships:'◇ Memberships',
+    inventory:'▣ Inventory',
+    expenses:'− Expenses',
+    finance:'↗ Finance',
+    team:'◌ Team',
+    operations:'✦ Operations',
+    settings:'⚙ Settings',
+    payment:'$ Record Payment',
+    frontdesk:'$ Front Desk',
+    account:'⚙ Account',
+    book:'□ Book a Class',
+    mybookings:'✓ My Bookings',
+    packages:'◇ Packages',
+    clientaccount:'◎ My Account'
+  };
+
+  return pages.map(x=>`
+    <button data-page="${x}" class="${page===x?'active':''}">
+      ${labels[x]}
+    </button>
+  `).join('')
+  +(isOwner()
+    ?db.custom_sections
+      .filter(x=>x.visible_owner!==false)
+      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0))
+      .map(x=>`
+        <button data-custom="${x.id}" class="${page==='custom:'+x.id?'active':''}">
+          ${esc(x.icon||'•')} ${esc(x.name)}
+        </button>
+      `).join('')
+    :'');
+}
+
+function render(){
+  if(page.startsWith('custom:'))return customSectionPage(page.split(':')[1]);
+
+  const f={
+    dashboard,
+    instructorhome,
+    clienthome,
+    clients,
+    schedule,
+    bookingsadmin,
+    pos,
+    memberships,
+    inventory,
+    expenses,
+    finance,
+    team,
+    operations,
+    settings,
+    payment,
+    frontdesk,
+    account,
+    book,
+    mybookings,
+    packages,
+    clientaccount
+  }[page];
+
+  (f||schedule)();
+}
+
+function ctClassDateTime(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  return {
+    total:rows.length,
+    booked:rows.filter(b=>b.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const rows=activeBookings(classId);
+  const names=rows.map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+function ctOwnerBookingsFilteredClasses(){
+  const now=new Date();
+  const startToday=new Date(today()+'T00:00:00');
+  const endToday=new Date(today()+'T23:59:59');
+
+  return (db.classes||[])
+    .filter(c=>!c.cancelled)
+    .filter(c=>bookingCount(c.id)>0)
+    .filter(c=>{
+      const dt=ctClassDateTime(c);
+      if(ownerBookingsFilter==='today')return dt>=startToday&&dt<=endToday;
+      if(ownerBookingsFilter==='upcoming')return dt>=startToday;
+      if(ownerBookingsFilter==='past')return dt<startToday;
+      return true;
+    })
+    .filter(c=>ownerBookingsStudio==='All'||(c.studio_type||'Pilates')===ownerBookingsStudio)
+    .filter(c=>{
+      const q=String(ownerBookingsSearch||'').trim().toLowerCase();
+      if(!q)return true;
+      const names=ctBookingClientNames(c.id,999).toLowerCase();
+      return [
+        c.class_type,
+        c.level,
+        c.instructor,
+        c.class_date,
+        c.class_time,
+        c.studio_type,
+        names
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a,b)=>{
+      const av=ctClassDateTime(a).getTime();
+      const bv=ctClassDateTime(b).getTime();
+      return ownerBookingsFilter==='past'?bv-av:av-bv;
+    });
+}
+
+function ownerBookingsSetFilter(value){
+  ownerBookingsFilter=value;
+  bookingsadmin();
+}
+
+function ownerBookingsSetStudio(value){
+  ownerBookingsStudio=value;
+  bookingsadmin();
+}
+
+function ownerBookingsSearchChanged(value){
+  ownerBookingsSearch=value;
+  bookingsadmin();
+}
+
+function bookingsadmin(){
+  if(!isOwner())return schedule();
+
+  const classes=ctOwnerBookingsFilteredClasses();
+  const allWithBookings=(db.classes||[]).filter(c=>!c.cancelled&&bookingCount(c.id)>0);
+  const todayCount=allWithBookings.filter(c=>c.class_date===today()).length;
+  const futureCount=allWithBookings.filter(c=>ctClassDateTime(c)>=new Date(today()+'T00:00:00')).length;
+  const pendingPayments=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).pending,0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi">
+        <div class="label">Classes with bookings today</div>
+        <div class="value">${todayCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Upcoming booked classes</div>
+        <div class="value">${futureCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Payment pending bookings</div>
+        <div class="value">${pendingPayments}</div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div>
+          <label class="muted">When</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsFilter==='upcoming'?'active':''}" onclick="ownerBookingsSetFilter('upcoming')">Upcoming</button>
+            <button class="tab ${ownerBookingsFilter==='today'?'active':''}" onclick="ownerBookingsSetFilter('today')">Today</button>
+            <button class="tab ${ownerBookingsFilter==='past'?'active':''}" onclick="ownerBookingsSetFilter('past')">Past</button>
+            <button class="tab ${ownerBookingsFilter==='all'?'active':''}" onclick="ownerBookingsSetFilter('all')">All</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="muted">Studio</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsStudio==='All'?'active':''}" onclick="ownerBookingsSetStudio('All')">All</button>
+            <button class="tab ${ownerBookingsStudio==='Pilates'?'active':''}" onclick="ownerBookingsSetStudio('Pilates')">Pilates</button>
+            <button class="tab ${ownerBookingsStudio==='Megacore'?'active':''}" onclick="ownerBookingsSetStudio('Megacore')">Megacore</button>
+          </div>
+        </div>
+
+        <div style="min-width:220px;flex:1">
+          <label class="muted">Search class or client</label>
+          <input
+            value="${esc(ownerBookingsSearch)}"
+            placeholder="Class name, instructor or client"
+            oninput="ownerBookingsSearchChanged(this.value)"
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    ${classes.length?`
+      <div class="card" style="padding:0;overflow:hidden">
+        ${classes.map(c=>{
+          const s=ctBookingClassStats(c.id);
+          const date=new Date(c.class_date+'T12:00:00');
+          const isToday=c.class_date===today();
+          const subName=typeof ctSubstituteDisplayNameForClass==='function'
+            ?ctSubstituteDisplayNameForClass(c)
+            :null;
+          const instructor=subName||c.instructor||'No instructor';
+
+          return `
+            <div
+              class="booking-person"
+              style="padding:16px 18px;border-bottom:1px solid rgba(0,0,0,.08);cursor:pointer;align-items:center"
+              onclick="openClass('${c.id}')"
+            >
+              <span style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                  <b style="font-size:16px">${esc(c.class_type||'Class')}</b>
+                  <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+                  <span class="badge">${esc(c.studio_type||'Pilates')}</span>
+                  ${isToday?'<span class="badge good">Today</span>':''}
+                </div>
+
+                <small style="display:block;margin-top:5px">
+                  ${date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}
+                  · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+                  · ${esc(instructor)}
+                </small>
+
+                <small class="muted" style="display:block;margin-top:5px">
+                  ${esc(ctBookingClientNames(c.id))}
+                </small>
+              </span>
+
+              <span style="text-align:right;min-width:130px">
+                <b>${s.total}/${Number(c.capacity||0)} booked</b>
+                <small style="display:block;margin-top:5px">
+                  ${s.checked?`${s.checked} checked in · `:''}${s.waitlist?`${s.waitlist} waitlist · `:''}${s.pending?`<b>${s.pending} payment pending</b>`:'Paid/valid'}
+                </small>
+                <button class="btn small" style="margin-top:8px" onclick="event.stopPropagation();openClass('${c.id}')">
+                  View bookings
+                </button>
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `:`
+      <div class="card empty">
+        No classes with bookings match these filters.
+      </div>
+    `}
+  `,
+  'Bookings',
+  'Every class that currently has a booking. Open a class to see the full roster, attendance and payment status.');
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.4 — EVENT GUESTS INCLUDED IN BOOKINGS
+// ============================================================================
+
+function ctGuestBookingsForClass(classId){
+  return (db.guest_bookings||[]).filter(g =>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+}
+
+function ctClassHasAnyBooking(classId){
+  return activeBookings(classId).length>0 || ctGuestBookingsForClass(classId).length>0;
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  const guests=ctGuestBookingsForClass(classId);
+
+  return {
+    total:rows.length+guests.length,
+    clientTotal:rows.length,
+    guestTotal:guests.length,
+    booked:rows.filter(b=>b.status==='booked').length
+      +guests.filter(g=>g.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length
+      +guests.filter(g=>g.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length
+      +guests.filter(g=>g.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+      +guests.filter(g=>g.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const clientNames=activeBookings(classId).map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+
+  const guestNames=ctGuestBookingsForClass(classId).map(g=>{
+    const guest=(db.guest_profiles||[]).find(x=>
+      String(x.id)===String(g.guest_id||g.guest_profile_id||'')
+    );
+
+    const name=
+      g.guest_name ||
+      guest?.name ||
+      guest?.full_name ||
+      'Guest';
+
+    const host=
+      g.host_name ||
+      guest?.host_name ||
+      '';
+
+    return `Guest: ${name}${host?` · invited by ${host}`:''}`;
+  });
+
+  const names=[...clientNames,...guestNames];
+
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+function ctOwnerBookingsFilteredClasses(){
+  const startToday=new Date(today()+'T00:00:00');
+  const endToday=new Date(today()+'T23:59:59');
+
+  return (db.classes||[])
+    .filter(c=>!c.cancelled)
+    .filter(c=>ctClassHasAnyBooking(c.id))
+    .filter(c=>{
+      const dt=ctClassDateTime(c);
+      if(ownerBookingsFilter==='today')return dt>=startToday&&dt<=endToday;
+      if(ownerBookingsFilter==='upcoming')return dt>=startToday;
+      if(ownerBookingsFilter==='past')return dt<startToday;
+      return true;
+    })
+    .filter(c=>ownerBookingsStudio==='All'||(c.studio_type||'Pilates')===ownerBookingsStudio)
+    .filter(c=>{
+      const q=String(ownerBookingsSearch||'').trim().toLowerCase();
+      if(!q)return true;
+
+      const names=ctBookingClientNames(c.id,999).toLowerCase();
+
+      return [
+        c.class_type,
+        c.level,
+        c.instructor,
+        c.class_date,
+        c.class_time,
+        c.studio_type,
+        names
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a,b)=>{
+      const av=ctClassDateTime(a).getTime();
+      const bv=ctClassDateTime(b).getTime();
+      return ownerBookingsFilter==='past'?bv-av:av-bv;
+    });
+}
+
+function bookingsadmin(){
+  if(!isOwner())return schedule();
+
+  const classes=ctOwnerBookingsFilteredClasses();
+  const allWithBookings=(db.classes||[]).filter(c=>!c.cancelled&&ctClassHasAnyBooking(c.id));
+
+  const todayCount=allWithBookings.filter(c=>c.class_date===today()).length;
+  const futureCount=allWithBookings.filter(c=>ctClassDateTime(c)>=new Date(today()+'T00:00:00')).length;
+  const pendingPayments=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).pending,0);
+  const eventGuests=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).guestTotal,0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi">
+        <div class="label">Classes with bookings today</div>
+        <div class="value">${todayCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Upcoming booked classes</div>
+        <div class="value">${futureCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Event guests</div>
+        <div class="value">${eventGuests}</div>
+        <small>${pendingPayments} payment pending</small>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div>
+          <label class="muted">When</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsFilter==='upcoming'?'active':''}" onclick="ownerBookingsSetFilter('upcoming')">Upcoming</button>
+            <button class="tab ${ownerBookingsFilter==='today'?'active':''}" onclick="ownerBookingsSetFilter('today')">Today</button>
+            <button class="tab ${ownerBookingsFilter==='past'?'active':''}" onclick="ownerBookingsSetFilter('past')">Past</button>
+            <button class="tab ${ownerBookingsFilter==='all'?'active':''}" onclick="ownerBookingsSetFilter('all')">All</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="muted">Studio</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsStudio==='All'?'active':''}" onclick="ownerBookingsSetStudio('All')">All</button>
+            <button class="tab ${ownerBookingsStudio==='Pilates'?'active':''}" onclick="ownerBookingsSetStudio('Pilates')">Pilates</button>
+            <button class="tab ${ownerBookingsStudio==='Megacore'?'active':''}" onclick="ownerBookingsSetStudio('Megacore')">Megacore</button>
+          </div>
+        </div>
+
+        <div style="min-width:220px;flex:1">
+          <label class="muted">Search class, client or guest</label>
+          <input
+            value="${esc(ownerBookingsSearch)}"
+            placeholder="Class name, client or guest"
+            oninput="ownerBookingsSearchChanged(this.value)"
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    ${classes.length?`
+      <div class="card" style="padding:0;overflow:hidden">
+        ${classes.map(c=>{
+          const s=ctBookingClassStats(c.id);
+          const date=new Date(c.class_date+'T12:00:00');
+          const isToday=c.class_date===today();
+          const subName=typeof ctSubstituteDisplayNameForClass==='function'
+            ?ctSubstituteDisplayNameForClass(c)
+            :null;
+          const instructor=subName||c.instructor||'No instructor';
+
+          return `
+            <div
+              class="booking-person"
+              style="padding:16px 18px;border-bottom:1px solid rgba(0,0,0,.08);cursor:pointer;align-items:center"
+              onclick="openClass('${c.id}')"
+            >
+              <span style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                  <b style="font-size:16px">${esc(c.class_type||'Class')}</b>
+                  <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+                  <span class="badge">${esc(c.studio_type||'Pilates')}</span>
+                  ${s.guestTotal?`<span class="badge good">${s.guestTotal} event guest${s.guestTotal===1?'':'s'}</span>`:''}
+                  ${isToday?'<span class="badge good">Today</span>':''}
+                </div>
+
+                <small style="display:block;margin-top:5px">
+                  ${date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}
+                  · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+                  · ${esc(instructor)}
+                </small>
+
+                <small class="muted" style="display:block;margin-top:5px">
+                  ${esc(ctBookingClientNames(c.id))}
+                </small>
+              </span>
+
+              <span style="text-align:right;min-width:145px">
+                <b>${s.total}/${Number(c.capacity||0)} booked</b>
+                <small style="display:block;margin-top:5px">
+                  ${s.clientTotal} client${s.clientTotal===1?'':'s'}
+                  ${s.guestTotal?` · ${s.guestTotal} guest${s.guestTotal===1?'':'s'}`:''}
+                </small>
+                <small style="display:block;margin-top:4px">
+                  ${s.checked?`${s.checked} checked in · `:''}${s.waitlist?`${s.waitlist} waitlist · `:''}${s.pending?`<b>${s.pending} payment pending</b>`:'Paid/valid'}
+                </small>
+                <button class="btn small" style="margin-top:8px" onclick="event.stopPropagation();openClass('${c.id}')">
+                  View roster
+                </button>
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `:`
+      <div class="card empty">
+        No classes with client or event-guest bookings match these filters.
+      </div>
+    `}
+  `,
+  'Bookings',
+  'Client bookings and event guests together. Open a class to see the complete roster.');
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.5 — BRING-A-FRIEND BOOKING = CLIENT + GUEST TOGETHER
+// ============================================================================
+
+function ctGuestPassEventForClass(cl){
+  if(!cl)return null;
+
+  return (db.studio_events||[]).find(e=>
+    !e.archived_at &&
+    e.active &&
+    e.event_type==='guest_pass' &&
+    e.start_date<=cl.class_date &&
+    e.end_date>=cl.class_date &&
+    (e.studio_scope==='Both' || e.studio_scope===(cl.studio_type||'Pilates')) &&
+    (!e.audience || e.audience==='Clients' || e.audience==='Everyone')
+  ) || null;
+}
+
+function ctClassOccupiedCountIncludingGuests(classId){
+  const normal=(db.bookings||[]).filter(b=>
+    String(b.class_id)===String(classId) &&
+    !['cancelled'].includes(b.status)
+  ).length;
+
+  const guests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  ).length;
+
+  return normal+guests;
+}
+
+function clientBook(classId){
+  const c=myClient();
+  const cl=db.classes.find(x=>String(x.id)===String(classId));
+
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+
+  if(db.bookings.some(b=>
+    String(b.class_id)===String(classId) &&
+    String(b.client_id)===String(c.id) &&
+    b.status!=='cancelled'
+  )){
+    return alert('You are already booked.');
+  }
+
+  const guestEvent=ctGuestPassEventForClass(cl);
+  const occupied=ctClassOccupiedCountIncludingGuests(classId);
+  const capacity=Number(cl.capacity||0);
+  const spotsLeft=Math.max(0,capacity-occupied);
+  const spotsNeeded=guestEvent?2:1;
+
+  if(spotsLeft<spotsNeeded){
+    return alert(
+      guestEvent
+        ?'This Bring-a-Friend booking needs 2 available spots, and there are not enough spots left.'
+        :'This class is full.'
+    );
+  }
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+
+  const rewards=db.client_rewards.filter(r=>
+    String(r.client_id)===String(c.id) &&
+    r.status==='active' &&
+    Number(r.sessions_remaining)>0 &&
+    r.valid_from<=today() &&
+    r.valid_until>=today() &&
+    (r.studio_scope==='Both'||r.studio_scope===classScope)
+  );
+
+  const currentOk=
+    (Number(c.sessions)===999||Number(c.sessions)>0) &&
+    (!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+
+  const option=(m)=>`
+    <option value="buy:${m.id}">
+      ${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))}
+      · ${m.sessions===999?'Unlimited':m.sessions+' sessions'}
+      · ${money(m.price)}
+    </option>`;
+
+  modal(
+    guestEvent?'Book for 2 · Bring a Friend':'How would you like to book?',
+    `
+      <div class="card" style="margin-bottom:12px">
+        <b>${esc(cl.class_type)}</b>
+        <p class="muted">
+          ${esc(classScope)} · ${esc(cl.class_date)}
+          · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+        </p>
+
+        ${guestEvent?`
+          <div class="notice" style="margin-top:10px">
+            <b>${esc(guestEvent.title||'Bring a Friend')}</b>
+            <p style="margin:5px 0 0">
+              This booking reserves <b>2 spots</b>: one for you and one free guest.
+              Your package/reward is used only for your own spot.
+            </p>
+          </div>
+        `:''}
+      </div>
+
+      <label>Booking option</label>
+      <select id="bookPackage">
+        ${rewards.map(r=>`
+          <option value="reward:${r.id}">
+            ${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE
+          </option>
+        `).join('')}
+
+        ${currentOk?`
+          <option value="current">
+            Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))}
+            · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}
+          </option>
+        `:''}
+
+        ${exact.length?`
+          <optgroup label="${esc(classScope)} packages">
+            ${exact.map(option).join('')}
+          </optgroup>
+        `:''}
+
+        ${mix.length?`
+          <optgroup label="Mix packages">
+            ${mix.map(option).join('')}
+          </optgroup>
+        `:''}
+      </select>
+
+      <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+      <input id="bookCoupon" placeholder="Enter coupon code">
+
+      ${guestEvent?`
+        <div class="card" style="margin-top:14px">
+          <h3 style="margin-top:0">Guest information</h3>
+
+          <label>Guest full name</label>
+          <input id="eventGuestName" autocomplete="name" placeholder="Guest full name" required>
+
+          <label>Guest phone</label>
+          <input id="eventGuestPhone" type="tel" autocomplete="tel" placeholder="Guest phone number" required>
+
+          <p class="muted">
+            The guest will be added to this same class and will count toward class capacity.
+          </p>
+        </div>
+      `:''}
+
+      <button class="btn primary full" onclick="confirmClientBooking('${classId}')">
+        ${guestEvent?'Continue · Book 2 spots':'Confirm booking'}
+      </button>
+    `
+  );
+}
+
+function confirmClientBooking(classId){
+  const choice=$("#bookPackage")?.value||'';
+  const coupon=$("#bookCoupon")?.value.trim()||'';
+  const cl=db.classes.find(x=>String(x.id)===String(classId));
+
+  if(!cl)return alert('Class not found.');
+  if(!choice)return alert('Choose how you would like to book.');
+
+  const guestEvent=ctGuestPassEventForClass(cl);
+
+  let guestName='';
+  let guestPhone='';
+
+  if(guestEvent){
+    guestName=($("#eventGuestName")?.value||'').trim();
+    guestPhone=($("#eventGuestPhone")?.value||'').trim();
+
+    if(!guestName)return alert('Enter your guest’s full name.');
+    if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+    const occupied=ctClassOccupiedCountIncludingGuests(classId);
+    if(Number(cl.capacity||0)-occupied<2){
+      return alert('There are no longer 2 spots available for you and your guest.');
+    }
+  }
+
+  if(choice.startsWith('buy:')){
+    const membershipId=choice.split(':')[1];
+    const m=db.memberships.find(x=>String(x.id)===String(membershipId));
+
+    if(!m)return alert('Package not found.');
+
+    const classScope=cl.studio_type||'Pilates';
+
+    if(!(
+      (m.studio_scope||'Both')==='Both' ||
+      (m.studio_scope||'Both')===classScope
+    )){
+      return alert(
+        `This ${packageScopeLabel(m.studio_scope||'Both')} package cannot be used for a ${classScope} class.`
+      );
+    }
+
+    modal('Confirm booking',`
+      <div class="card" style="margin-bottom:12px">
+        <b>${esc(cl.class_type)}</b>
+        <p class="muted">
+          ${esc(classScope)} · ${esc(cl.class_date)}
+          · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+        </p>
+      </div>
+
+      ${guestEvent?`
+        <div class="notice card" style="margin-bottom:12px">
+          <b>2 spots will be reserved</b>
+          <p>You + <b>${esc(guestName)}</b></p>
+          <small>${esc(guestPhone)}</small>
+        </div>
+      `:''}
+
+      ${packageSummaryHtml(m)}
+      ${coupon?`<p><b>Coupon:</b> ${esc(coupon)}</p>`:''}
+
+      <p class="muted">
+        Your package request remains Payment Pending until Core Theory collects payment.
+        ${guestEvent?'Your guest is free under the event.':''}
+      </p>
+
+      <button
+        class="btn primary full"
+        onclick="submitClientBooking(
+          '${classId}',
+          '${choice}',
+          '${encodeURIComponent(coupon)}',
+          '${guestEvent?.id||''}',
+          '${encodeURIComponent(guestName)}',
+          '${encodeURIComponent(guestPhone)}'
+        )"
+      >
+        ${guestEvent?'Confirm 2-person booking':'Confirm booking'}
+      </button>
+
+      <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">
+        Change option
+      </button>
+    `);
+
+    return;
+  }
+
+  const c=myClient();
+  const text=choice==='current'
+    ?`Use current package · ${packageScopeLabel(c?.package_scope||'Both')} · ${c?.sessions===999?'Unlimited':(c?.sessions??0)+' sessions left'}`
+    :'Use free reward';
+
+  modal('Confirm booking',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(cl.class_type)}</b>
+      <p class="muted">
+        ${esc(cl.studio_type||'Pilates')} · ${esc(cl.class_date)}
+        · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+      </p>
+    </div>
+
+    ${guestEvent?`
+      <div class="notice card" style="margin-bottom:12px">
+        <b>Bring a Friend · 2 spots</b>
+        <p>You + <b>${esc(guestName)}</b></p>
+        <small>${esc(guestPhone)}</small>
+      </div>
+    `:''}
+
+    <p><b>${esc(text)}</b></p>
+
+    <button
+      class="btn primary full"
+      onclick="submitClientBooking(
+        '${classId}',
+        '${choice}',
+        '',
+        '${guestEvent?.id||''}',
+        '${encodeURIComponent(guestName)}',
+        '${encodeURIComponent(guestPhone)}'
+      )"
+    >
+      ${guestEvent?'Confirm 2-person booking':'Confirm booking'}
+    </button>
+
+    <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">
+      Change option
+    </button>
+  `);
+}
+
+async function submitClientBooking(
+  classId,
+  choice,
+  couponEncoded,
+  eventId='',
+  guestNameEncoded='',
+  guestPhoneEncoded=''
+){
+  const coupon=decodeURIComponent(couponEncoded||'');
+  const guestName=decodeURIComponent(guestNameEncoded||'');
+  const guestPhone=decodeURIComponent(guestPhoneEncoded||'');
+
+  let membershipId=null;
+  let rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];
+  else if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];
+
+  const btn=document.querySelector('#modal .btn.primary');
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking…';
+  }
+
+  const rpc=eventId?'book_class_with_event_guest':'book_class_v3';
+
+  const args=eventId
+    ?{
+        p_class_id:String(classId),
+        p_membership_id:membershipId,
+        p_coupon_code:coupon||null,
+        p_reward_id:rewardId,
+        p_event_id:String(eventId),
+        p_guest_name:guestName,
+        p_guest_phone:guestPhone
+      }
+    :{
+        p_class_id:String(classId),
+        p_membership_id:membershipId,
+        p_coupon_code:coupon||null,
+        p_reward_id:rewardId
+      };
+
+  const {data,error}=await sb.rpc(rpc,args);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=eventId?'Confirm 2-person booking':'Confirm booking';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  if(eventId){
+    return alert(
+      membershipId
+        ?'You and your guest are booked in the same class. Your package payment is pending.'
+        :'You and your guest are booked in the same class.'
+    );
+  }
+
+  const status=data?.status||'booked';
+  const pay=data?.payment_status||'paid';
+
+  if(status==='waitlist'){
+    return alert(
+      pay==='pending'
+        ?'Added to waitlist. Package payment is pending.'
+        :'Added to waitlist.'
+    );
+  }
+
+  if(rewardId)return alert('Booked with your free reward!');
+  if(membershipId&&pay==='pending')return alert('Class booked. Package payment is pending.');
+
+  alert('Class booked.');
+}
+
+
+// The old Home-page event button no longer creates a separate guest-only booking.
+// It directs the client to book the class, where guest details are collected together.
+function guestEventModal(eventId){
+  const e=db.studio_events.find(x=>String(x.id)===String(eventId));
+  if(!e)return;
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card">
+      <b>Book together</b>
+      <p>
+        During this event, choose an eligible class from <b>Book a Class</b>.
+        Core Theory will reserve 2 spots together: one for you and one for your guest.
+      </p>
+      <p class="muted">
+        You will enter your guest’s name and phone number before confirming.
+      </p>
+    </div>
+
+    <button class="btn primary full" onclick="$('#modal').remove();page='book';render()">
+      Choose a class
+    </button>
+  `);
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.6 — OWNER COMPLIMENTARY GUESTS
+// ============================================================================
+
+const ctV106BaseLoadAll = loadAll;
+
+loadAll = async function(){
+  await ctV106BaseLoadAll();
+
+  if(!session||!profile)return;
+
+  db.owner_comp_guests = db.owner_comp_guests || [];
+
+  if(isOwner()){
+    const {data,error}=await sb
+      .from('owner_comp_guests')
+      .select('*')
+      .order('created_at',{ascending:false});
+
+    if(!error)db.owner_comp_guests=data||[];
+  }else if(isInstructor()){
+    const {data,error}=await sb.rpc('my_owner_comp_guest_roster');
+    if(!error)db.owner_comp_guests=data||[];
+  }
+
+  render();
+};
+
+function ctOwnerCompGuestsForClass(classId){
+  return (db.owner_comp_guests||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+}
+
+function ctClassOccupiedCountIncludingGuests(classId){
+  const normal=(db.bookings||[]).filter(b=>
+    String(b.class_id)===String(classId) &&
+    !['cancelled','waitlist'].includes(b.status)
+  ).length;
+
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    !['cancelled','waitlist'].includes(g.status)
+  ).length;
+
+  const ownerGuests=ctOwnerCompGuestsForClass(classId)
+    .filter(g=>g.status!=='waitlist').length;
+
+  return normal+eventGuests+ownerGuests;
+}
+
+function classCheckedInCount(c){
+  return db.bookings.filter(b=>
+    String(b.class_id)===String(c.id) &&
+    b.status==='checked_in'
+  ).length
+  +(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(c.id) &&
+    g.status==='checked_in'
+  ).length
+  +ctOwnerCompGuestsForClass(c.id).filter(g=>
+    g.status==='checked_in'
+  ).length;
+}
+
+function ownerAddGuestModal(classId){
+  if(!isOwner())return;
+
+  const c=db.classes.find(x=>String(x.id)===String(classId));
+  if(!c)return alert('Class not found.');
+
+  const occupied=ctClassOccupiedCountIncludingGuests(classId);
+  const capacity=Number(c.capacity||0);
+  const full=occupied>=capacity;
+
+  modal('Add free guest',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(c.class_type||'Class')}</b>
+      <p class="muted">
+        ${esc(c.class_date)} · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+        · ${esc(c.studio_type||'Pilates')}
+      </p>
+      <p>
+        <b>${occupied}/${capacity}</b> spots currently used
+      </p>
+    </div>
+
+    ${full?`
+      <div class="warning" style="margin-bottom:12px">
+        This class is currently full. You can still add the guest only if you explicitly allow over-capacity.
+      </div>
+    `:''}
+
+    <label>Guest full name</label>
+    <input id="ownerGuestName" placeholder="Guest full name" autocomplete="name">
+
+    <label>Guest phone</label>
+    <input id="ownerGuestPhone" type="tel" placeholder="Guest phone number" autocomplete="tel">
+
+    <label>Note <span class="muted">(optional)</span></label>
+    <input id="ownerGuestNote" placeholder="e.g. Owner invite, influencer, trial guest">
+
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
+      <input id="ownerGuestOverride" type="checkbox" style="width:auto;margin-top:3px">
+      <span>
+        <b>Allow over capacity</b>
+        <small class="muted" style="display:block">
+          Use only when you intentionally want this guest added even if the class is full.
+        </small>
+      </span>
+    </label>
+
+    <button class="btn primary full" id="ownerGuestSaveBtn" onclick="ownerSaveFreeGuest('${classId}')">
+      Add guest for free
+    </button>
+
+    <p class="muted">
+      No package, session, payment or revenue is created. The guest appears in Bookings and in the class roster.
+    </p>
+  `);
+}
+
+async function ownerSaveFreeGuest(classId){
+  if(!isOwner())return;
+
+  const name=($("#ownerGuestName")?.value||'').trim();
+  const phone=($("#ownerGuestPhone")?.value||'').trim();
+  const note=($("#ownerGuestNote")?.value||'').trim();
+  const allowOverCapacity=$("#ownerGuestOverride")?.checked===true;
+
+  if(!name)return alert('Enter the guest’s full name.');
+  if(!phone)return alert('Enter the guest’s phone number.');
+
+  const btn=$("#ownerGuestSaveBtn");
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Adding guest…';
+  }
+
+  const {error}=await sb.rpc('owner_add_free_guest',{
+    p_class_id:String(classId),
+    p_guest_name:name,
+    p_guest_phone:phone,
+    p_note:note||null,
+    p_allow_over_capacity:allowOverCapacity
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Add guest for free';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+  openClass(classId);
+  alert('Guest added for free.');
+}
+
+async function checkInOwnerGuest(id){
+  const {error}=await sb.rpc('check_in_owner_free_guest',{
+    p_guest_booking_id:String(id)
+  });
+
+  if(error)return alert(error.message);
+
+  await loadAll();
+  alert('Guest checked in.');
+}
+
+async function cancelOwnerFreeGuest(id,classId){
+  if(!isOwner())return;
+  if(!confirm('Remove this complimentary guest from the class?'))return;
+
+  const {error}=await sb.rpc('cancel_owner_free_guest',{
+    p_guest_booking_id:String(id)
+  });
+
+  if(error)return alert(error.message);
+
+  await loadAll();
+  openClass(classId);
+}
+
+function openClass(id){
+  const c=db.classes.find(x=>String(x.id)===String(id));
+  if(!c)return;
+
+  const bs=activeBookings(id);
+
+  const eventGuests=isOwner()
+    ?(db.guest_bookings||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled')
+    :(db.guestRoster||[]).filter(g=>String(g.class_id)===String(id)&&g.status!=='cancelled');
+
+  const ownerGuests=ctOwnerCompGuestsForClass(id);
+
+  const checked=
+    bs.filter(b=>b.status==='checked_in').length+
+    eventGuests.filter(g=>g.status==='checked_in').length+
+    ownerGuests.filter(g=>g.status==='checked_in').length;
+
+  const noShows=
+    bs.filter(b=>b.status==='no_show').length+
+    eventGuests.filter(g=>g.status==='no_show').length+
+    ownerGuests.filter(g=>g.status==='no_show').length;
+
+  const wait=
+    bs.filter(b=>b.status==='waitlist').length+
+    eventGuests.filter(g=>g.status==='waitlist').length;
+
+  const pending=bs.filter(b=>b.payment_status==='pending').length;
+  const notes=teachingNotesForClass(id);
+
+  const rows=bs.map(b=>{
+    const roster=db.roster?.find(r=>String(r.booking_id)===String(b.id));
+    const cl=isOwner()?db.clients.find(x=>String(x.id)===String(b.client_id)):null;
+    const clientName=cl?.name||roster?.client_name||'Client';
+    const n=notes.filter(x=>String(x.client_id)===String(b.client_id));
+
+    return `
+      <div class="booking-person">
+        <span>
+          <b>${esc(clientName)}</b>
+          <small>
+            ${esc(b.status)} ·
+            ${b.payment_status==='pending'?'<b>Payment Pending</b>':esc(b.payment_status||'paid')}
+          </small>
+          ${n.map(x=>`<small>⚑ ${esc(x.category)}: ${esc(x.note)}</small>`).join('')}
+        </span>
+
+        ${isStaff()?`
+          <span>
+            ${b.status==='booked'?`<button class="btn small" onclick="checkIn('${b.id}')">Check in</button>`:''}
+            <button class="btn small" onclick="setBookingStatus('${b.id}','no_show')">No-show</button>
+            ${isOwner()&&b.payment_status==='pending'&&!b.package_order_id
+              ?` <button class="btn small primary" onclick="manualOwnerBookingPayment('${b.id}',decodeURIComponent('${encodeURIComponent(clientName)}'))">Add package / collect</button>`
+              :''}
+          </span>
+        `:''}
+      </div>`;
+  }).join('');
+
+  const eventGuestRows=eventGuests.map(g=>`
+    <div class="booking-person">
+      <span>
+        <b>${esc(g.guest_name||'Guest')}</b>
+        <small>
+          Event guest · ${esc(g.status)}
+          ${g.host_name?' · invited by '+esc(g.host_name):''}
+        </small>
+      </span>
+      ${isStaff()&&g.status==='booked'
+        ?`<button class="btn small" onclick="checkInGuest('${g.booking_id||g.id}')">Check in guest</button>`
+        :''}
+    </div>
+  `).join('');
+
+  const ownerGuestRows=ownerGuests.map(g=>`
+    <div class="booking-person">
+      <span>
+        <b>${esc(g.guest_name||'Guest')}</b>
+        <small>
+          Complimentary guest · ${esc(g.status)}
+          ${g.note?' · '+esc(g.note):''}
+        </small>
+        ${isOwner()&&g.guest_phone?`<small>${esc(g.guest_phone)}</small>`:''}
+      </span>
+
+      <span>
+        ${(isOwner()||isInstructor())&&g.status==='booked'
+          ?`<button class="btn small" onclick="checkInOwnerGuest('${g.id}')">Check in</button>`
+          :''}
+        ${isOwner()
+          ?`<button class="btn small danger" onclick="cancelOwnerFreeGuest('${g.id}','${c.id}')">Remove</button>`
+          :''}
+      </span>
+    </div>
+  `).join('');
+
+  const total=bs.length+eventGuests.length+ownerGuests.length;
+
+  modal(
+    `${esc(c.class_type)} · ${formatTime((c.class_time||'00:00').slice(0,5))}`,
+    `
+      <p>
+        <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+        ${esc(c.studio_type||'Pilates')} · ${esc(c.instructor||'')}
+      </p>
+
+      <div class="grid three">
+        <div class="card kpi">
+          <div class="label">Booked</div>
+          <div class="value">${total}</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Checked in</div>
+          <div class="value">${checked}</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Waitlist</div>
+          <div class="value">${wait}</div>
+        </div>
+      </div>
+
+      <p class="muted">
+        No-shows: ${noShows} · Payment pending: ${pending} · Capacity: ${c.capacity||0}
+      </p>
+
+      ${rows}
+      ${eventGuestRows}
+      ${ownerGuestRows}
+
+      ${!rows&&!eventGuestRows&&!ownerGuestRows
+        ?'<div class="empty">No bookings yet.</div>'
+        :''}
+
+      ${isOwner()?`
+        <div class="toolbar">
+          <button class="btn primary" onclick="addBookingModal('${c.id}')">+ Add client</button>
+          <button class="btn" onclick="ownerAddGuestModal('${c.id}')">+ Add free guest</button>
+          <button class="btn" onclick="$('#modal').remove();editClassModal('${c.id}')">Edit class</button>
+          <button class="btn" onclick="substituteClassModal('${c.id}')">Substitute</button>
+        </div>
+      `:''}
+    `
+  );
+}
+
+function ctGuestBookingsForClass(classId){
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+
+  return [...eventGuests,...ctOwnerCompGuestsForClass(classId)];
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  const eventGuests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+  const ownerGuests=ctOwnerCompGuestsForClass(classId);
+  const guests=[...eventGuests,...ownerGuests];
+
+  return {
+    total:rows.length+guests.length,
+    clientTotal:rows.length,
+    guestTotal:guests.length,
+    booked:rows.filter(b=>b.status==='booked').length
+      +guests.filter(g=>g.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length
+      +guests.filter(g=>g.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length
+      +guests.filter(g=>g.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+      +guests.filter(g=>g.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const clientNames=activeBookings(classId).map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+
+  const eventGuestNames=(db.guest_bookings||[])
+    .filter(g=>String(g.class_id)===String(classId)&&g.status!=='cancelled')
+    .map(g=>{
+      const guest=(db.guest_profiles||[]).find(x=>
+        String(x.id)===String(g.guest_id||g.guest_profile_id||'')
+      );
+      const name=g.guest_name||guest?.name||guest?.full_name||'Guest';
+      const host=g.host_name||guest?.host_name||'';
+      return `Guest: ${name}${host?` · invited by ${host}`:''}`;
+    });
+
+  const ownerGuestNames=ctOwnerCompGuestsForClass(classId)
+    .map(g=>`Guest: ${g.guest_name} · complimentary`);
+
+  const names=[...clientNames,...eventGuestNames,...ownerGuestNames];
+
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.7 — EVENT PAIR BOOKING SAFETY
+// The server now verifies the CLIENT booking exists before creating the guest.
+// This prevents a guest-only event reservation.
+// ============================================================================
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.8 — HOME PAGE BRING-A-GUEST FLOW
+// Clicking the event on Client Home starts a true 2-person booking flow.
+// ============================================================================
+
+let ctSelectedGuestEventId='';
+
+const ctV108BaseGuestEventForClass = ctGuestPassEventForClass;
+
+ctGuestPassEventForClass = function(cl){
+  if(!cl)return null;
+
+  if(ctSelectedGuestEventId){
+    const selected=(db.studio_events||[]).find(e=>
+      String(e.id)===String(ctSelectedGuestEventId) &&
+      !e.archived_at &&
+      e.active &&
+      e.event_type==='guest_pass' &&
+      e.start_date<=cl.class_date &&
+      e.end_date>=cl.class_date &&
+      (e.studio_scope==='Both' || e.studio_scope===(cl.studio_type||'Pilates')) &&
+      (!e.audience || e.audience==='Clients' || e.audience==='Everyone')
+    );
+    if(selected)return selected;
+  }
+
+  return ctV108BaseGuestEventForClass(cl);
+};
+
+function guestEventModal(eventId){
+  const e=(db.studio_events||[]).find(x=>String(x.id)===String(eventId));
+  if(!e)return;
+
+  const eligible=(db.classes||[])
+    .filter(c=>
+      !c.cancelled &&
+      !clientClassIsPast(c) &&
+      !clientBookingClosed(c) &&
+      c.class_date>=e.start_date &&
+      c.class_date<=e.end_date &&
+      (e.studio_scope==='Both'||(c.studio_type||'Pilates')===e.studio_scope)
+    )
+    .filter(c=>{
+      const cClient=myClient();
+      return !db.bookings.some(b=>
+        String(b.class_id)===String(c.id) &&
+        String(b.client_id)===String(cClient?.id) &&
+        b.status!=='cancelled'
+      );
+    })
+    .filter(c=>{
+      const occupied=ctClassOccupiedCountIncludingGuests(c.id);
+      return Number(c.capacity||0)-occupied>=2;
+    })
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card" style="margin-bottom:14px">
+      <b>Book yourself + 1 guest</b>
+      <p style="margin:6px 0 0">
+        This reserves <b>2 spots in the same class</b>: one for you and one free guest.
+      </p>
+    </div>
+
+    ${eligible.length?`
+      <label>Choose your class</label>
+      <select id="homeGuestClass">
+        ${eligible.map(c=>`
+          <option value="${c.id}">
+            ${esc(new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))}
+            · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+            · ${esc(c.class_type||'Class')}
+            · ${esc(c.studio_type||'Pilates')}
+          </option>
+        `).join('')}
+      </select>
+
+      <label>Guest full name</label>
+      <input id="homeGuestName" autocomplete="name" placeholder="Guest full name">
+
+      <label>Guest phone</label>
+      <input id="homeGuestPhone" type="tel" autocomplete="tel" placeholder="Guest phone number">
+
+      <p class="muted">
+        Your guest is free. Your own package or reward is used only for your spot.
+      </p>
+
+      <button class="btn primary full" onclick="continueHomeGuestBooking('${eventId}')">
+        Continue to booking
+      </button>
+    `:`
+      <div class="warning">
+        There are no eligible classes with 2 available spots during this event right now.
+      </div>
+    `}
+  `);
+}
+
+function continueHomeGuestBooking(eventId){
+  const classId=$("#homeGuestClass")?.value||'';
+  const guestName=($("#homeGuestName")?.value||'').trim();
+  const guestPhone=($("#homeGuestPhone")?.value||'').trim();
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  ctSelectedGuestEventId=String(eventId);
+
+  $("#modal")?.remove();
+
+  // Open the normal client booking flow for the CLIENT's own spot.
+  // Because the selected event is active, clientBook automatically switches
+  // to the 2-person event flow.
+  clientBook(classId);
+
+  // Pre-fill the guest details the client already entered on Home.
+  const n=$("#eventGuestName");
+  const p=$("#eventGuestPhone");
+
+  if(n)n.value=guestName;
+  if(p)p.value=guestPhone;
+}
+
+const ctV108BaseSubmitClientBooking = submitClientBooking;
+
+submitClientBooking = async function(
+  classId,
+  choice,
+  couponEncoded,
+  eventId='',
+  guestNameEncoded='',
+  guestPhoneEncoded=''
+){
+  try{
+    return await ctV108BaseSubmitClientBooking(
+      classId,
+      choice,
+      couponEncoded,
+      eventId,
+      guestNameEncoded,
+      guestPhoneEncoded
+    );
+  }finally{
+    ctSelectedGuestEventId='';
+  }
+};
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.9 — HARD OVERRIDE: HOME EVENT MUST BOOK CLIENT + GUEST
+// This assignment is intentionally at the very end of the bundle so it wins
+// over every older guestEventModal declaration still present in legacy code.
+// ============================================================================
+
+window.guestEventModal = function(eventId){
+  const e=(db.studio_events||[]).find(x=>String(x.id)===String(eventId));
+  if(!e)return alert('Event not found.');
+
+  const me=myClient();
+  if(!me)return alert('Client account not ready. Refresh and try again.');
+
+  const eligible=(db.classes||[])
+    .filter(c=>
+      !c.cancelled &&
+      !clientClassIsPast(c) &&
+      !clientBookingClosed(c) &&
+      c.class_date>=e.start_date &&
+      c.class_date<=e.end_date &&
+      (e.studio_scope==='Both'||(c.studio_type||'Pilates')===e.studio_scope)
+    )
+    .filter(c=>!db.bookings.some(b=>
+      String(b.class_id)===String(c.id) &&
+      String(b.client_id)===String(me.id) &&
+      b.status!=='cancelled'
+    ))
+    .filter(c=>{
+      const occupied=ctClassOccupiedCountIncludingGuests(c.id);
+      return Number(c.capacity||0)-occupied>=2;
+    })
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card" style="margin-bottom:14px">
+      <b>You + 1 guest</b>
+      <p style="margin:6px 0 0">
+        You are booking <b>yourself and your guest together</b>.
+        Core Theory will reserve 2 spots in the same class.
+      </p>
+    </div>
+
+    ${eligible.length?`
+      <label>Class</label>
+      <select id="v109EventClass">
+        ${eligible.map(c=>`
+          <option value="${c.id}">
+            ${esc(new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))}
+            · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+            · ${esc(c.class_type||'Class')}
+            · ${esc(c.studio_type||'Pilates')}
+          </option>
+        `).join('')}
+      </select>
+
+      <label>Guest full name</label>
+      <input id="v109GuestName" autocomplete="name" placeholder="Guest full name">
+
+      <label>Guest phone</label>
+      <input id="v109GuestPhone" type="tel" autocomplete="tel" placeholder="Guest phone number">
+
+      <p class="muted">
+        Your guest is free. Your own package or reward is used for your spot only.
+      </p>
+
+      <button class="btn primary full" onclick="window.v109ContinuePairBooking('${eventId}')">
+        Continue
+      </button>
+    `:`
+      <div class="warning">
+        No eligible class currently has 2 available spots during this event.
+      </div>
+    `}
+  `);
+};
+
+window.v109ContinuePairBooking = function(eventId){
+  const classId=$("#v109EventClass")?.value||'';
+  const guestName=($("#v109GuestName")?.value||'').trim();
+  const guestPhone=($("#v109GuestPhone")?.value||'').trim();
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  const e=(db.studio_events||[]).find(x=>String(x.id)===String(eventId));
+  const cl=(db.classes||[]).find(x=>String(x.id)===String(classId));
+  const me=myClient();
+
+  if(!e||!cl||!me)return alert('Booking details are not ready. Refresh and try again.');
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+
+  const rewards=(db.client_rewards||[]).filter(r=>
+    String(r.client_id)===String(me.id) &&
+    r.status==='active' &&
+    Number(r.sessions_remaining)>0 &&
+    r.valid_from<=today() &&
+    r.valid_until>=today() &&
+    (r.studio_scope==='Both'||r.studio_scope===classScope)
+  );
+
+  const currentOk=
+    (Number(me.sessions)===999||Number(me.sessions)>0) &&
+    (!me.package_scope||me.package_scope==='Both'||me.package_scope===classScope);
+
+  const option=(m)=>`
+    <option value="buy:${m.id}">
+      ${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))}
+      · ${m.sessions===999?'Unlimited':m.sessions+' sessions'}
+      · ${money(m.price)}
+    </option>`;
+
+  modal('Confirm 2-person booking',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(me.name||'You')} + ${esc(guestName)}</b>
+      <p class="muted">
+        ${esc(cl.class_type||'Class')} · ${esc(cl.class_date)}
+        · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+      </p>
+      <p><b>2 spots will be reserved</b></p>
+    </div>
+
+    <label>Your booking option</label>
+    <select id="v109BookPackage">
+      ${rewards.map(r=>`
+        <option value="reward:${r.id}">
+          ${esc(r.title)} · FREE
+        </option>
+      `).join('')}
+
+      ${currentOk?`
+        <option value="current">
+          Use current package · ${me.sessions===999?'Unlimited':me.sessions+' sessions left'}
+        </option>
+      `:''}
+
+      ${exact.length?`
+        <optgroup label="${esc(classScope)} packages">
+          ${exact.map(option).join('')}
+        </optgroup>
+      `:''}
+
+      ${mix.length?`
+        <optgroup label="Mix packages">
+          ${mix.map(option).join('')}
+        </optgroup>
+      `:''}
+    </select>
+
+    <label>Coupon code <span class="muted">(optional if buying)</span></label>
+    <input id="v109Coupon" placeholder="Enter coupon code">
+
+    <div class="notice card" style="margin-top:12px">
+      <b>Guest details</b>
+      <p>${esc(guestName)}</p>
+      <small>${esc(guestPhone)}</small>
+    </div>
+
+    <button class="btn primary full" onclick="window.v109SubmitPairBooking(
+      '${classId}',
+      '${eventId}',
+      '${encodeURIComponent(guestName)}',
+      '${encodeURIComponent(guestPhone)}'
+    )">
+      Book both
+    </button>
+  `);
+};
+
+window.v109SubmitPairBooking = async function(classId,eventId,guestNameEncoded,guestPhoneEncoded){
+  const choice=$("#v109BookPackage")?.value||'';
+  const coupon=($("#v109Coupon")?.value||'').trim();
+
+  if(!choice)return alert('Choose your booking option.');
+
+  let membershipId=null;
+  let rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];
+  if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking both…';
+  }
+
+  const {data,error}=await sb.rpc('book_class_with_event_guest',{
+    p_class_id:String(classId),
+    p_membership_id:membershipId,
+    p_coupon_code:membershipId?(coupon||null):null,
+    p_reward_id:rewardId,
+    p_event_id:String(eventId),
+    p_guest_name:decodeURIComponent(guestNameEncoded||''),
+    p_guest_phone:decodeURIComponent(guestPhoneEncoded||'')
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Book both';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  alert(
+    `Booked 2 spots: ${data?.client_name||'you'} + ${data?.guest_name||'your guest'}.`
+  );
+};
+
+
+
+// ============================================================================
+// CORE THEORY V10.1.2 — GUEST BOOKING MUST OFFER PACKAGE CHOICE
+//
+// IMPORTANT:
+// The legacy guest modal's button calls bookEventGuest(eventId).
+// This final override intercepts that old path too, so even if an older modal
+// appears, the client is NOT forced to use a nonexistent current package.
+// Instead they choose a valid package/reward and can create Payment Pending.
+// ============================================================================
+
+window.bookEventGuest = function(eventId){
+  const guestName=($("#guestName")?.value||$("#v109GuestName")?.value||'').trim();
+  const guestPhone=($("#guestPhone")?.value||$("#v109GuestPhone")?.value||'').trim();
+  const classId=$("#guestClass")?.value||$("#v109EventClass")?.value||'';
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  window.v1012ShowPairPackageChoice(eventId,classId,guestName,guestPhone);
+};
+
+window.v1012ShowPairPackageChoice = function(eventId,classId,guestName,guestPhone){
+  const cl=(db.classes||[]).find(x=>String(x.id)===String(classId));
+  const me=myClient();
+
+  if(!cl||!me)return alert('Booking details are not ready. Refresh and try again.');
+
+  const occupied=ctClassOccupiedCountIncludingGuests(classId);
+  if(Number(cl.capacity||0)-occupied<2){
+    return alert('This Bring-a-Friend booking needs 2 available spots.');
+  }
+
+  const classScope=cl.studio_type||'Pilates';
+
+  const eligible=packageSortForClient(
+    (db.memberships||[]).filter(m=>packageEligible(m,cl))
+  );
+
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+
+  const rewards=(db.client_rewards||[]).filter(r=>
+    String(r.client_id)===String(me.id) &&
+    r.status==='active' &&
+    Number(r.sessions_remaining)>0 &&
+    r.valid_from<=today() &&
+    r.valid_until>=today() &&
+    (r.studio_scope==='Both'||r.studio_scope===classScope)
+  );
+
+  const currentOk=
+    (Number(me.sessions)===999||Number(me.sessions)>0) &&
+    (!me.expiry||me.expiry>=today()) &&
+    (!me.package_frozen_until||me.package_frozen_until<today()) &&
+    (!me.package_scope||me.package_scope==='Both'||me.package_scope===classScope);
+
+  const packageOption=(m)=>`
+    <option value="buy:${m.id}">
+      ${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))}
+      · ${m.sessions===999?'Unlimited':m.sessions+' sessions'}
+      · ${money(m.price)}
+      · Pay later
+    </option>`;
+
+  const choices = `
+    ${rewards.map(r=>`
+      <option value="reward:${r.id}">
+        ${esc(r.title)} · FREE
+      </option>
+    `).join('')}
+
+    ${currentOk?`
+      <option value="current">
+        Use current package ·
+        ${me.sessions===999?'Unlimited':me.sessions+' sessions left'}
+      </option>
+    `:''}
+
+    ${exact.length?`
+      <optgroup label="${esc(classScope)} packages">
+        ${exact.map(packageOption).join('')}
+      </optgroup>
+    `:''}
+
+    ${mix.length?`
+      <optgroup label="Mix packages">
+        ${mix.map(packageOption).join('')}
+      </optgroup>
+    `:''}
+  `;
+
+  if(!rewards.length && !currentOk && !exact.length && !mix.length){
+    return alert('No compatible packages are available for this class.');
+  }
+
+  modal('Book yourself + your guest',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(me.name||'You')} + ${esc(guestName)}</b>
+      <p class="muted">
+        ${esc(cl.class_type||'Class')} ·
+        ${esc(cl.class_date)} ·
+        ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+      </p>
+      <p><b>2 spots will be reserved in the same class.</b></p>
+    </div>
+
+    ${!currentOk?`
+      <div class="notice card" style="margin-bottom:12px">
+        <b>You do not have a usable current session.</b>
+        <p style="margin:5px 0 0">
+          Choose a package below. It will be created as <b>Payment Pending</b>
+          and you can pay Core Theory later.
+        </p>
+      </div>
+    `:''}
+
+    <label>Your package / reward</label>
+    <select id="v1012PairChoice">
+      ${choices}
+    </select>
+
+    <label>Coupon code <span class="muted">(optional when choosing a new package)</span></label>
+    <input id="v1012PairCoupon" placeholder="Enter coupon code">
+
+    <div class="card" style="margin-top:12px">
+      <small class="muted">Guest</small>
+      <b style="display:block">${esc(guestName)}</b>
+      <small>${esc(guestPhone)}</small>
+    </div>
+
+    <button class="btn primary full" onclick="window.v1012SubmitPairBooking(
+      '${classId}',
+      '${eventId}',
+      '${encodeURIComponent(guestName)}',
+      '${encodeURIComponent(guestPhone)}'
+    )">
+      Book both
+    </button>
+  `);
+};
+
+window.v1012SubmitPairBooking = async function(
+  classId,
+  eventId,
+  guestNameEncoded,
+  guestPhoneEncoded
+){
+  const choice=$("#v1012PairChoice")?.value||'';
+  const coupon=($("#v1012PairCoupon")?.value||'').trim();
+
+  if(!choice)return alert('Choose your package or reward.');
+
+  let membershipId=null;
+  let rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.slice(4);
+  if(choice.startsWith('reward:'))rewardId=choice.slice(7);
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking both…';
+  }
+
+  const {data,error}=await sb.rpc('book_class_with_event_guest',{
+    p_class_id:String(classId),
+    p_membership_id:membershipId,
+    p_coupon_code:membershipId?(coupon||null):null,
+    p_reward_id:rewardId,
+    p_event_id:String(eventId),
+    p_guest_name:decodeURIComponent(guestNameEncoded||''),
+    p_guest_phone:decodeURIComponent(guestPhoneEncoded||'')
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Book both';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const pending=String(data?.payment_status||'paid')==='pending';
+
+  alert(
+    pending
+      ?`Booked 2 spots: ${data?.client_name||'you'} + ${data?.guest_name||'your guest'}. Your package is Payment Pending.`
+      :`Booked 2 spots: ${data?.client_name||'you'} + ${data?.guest_name||'your guest'}.`
+  );
+};
+
+
+
+// ============================================================================
+// CORE THEORY V10.1.3 — FORCE ALL BRING-A-FRIEND UI INTO PAIR FLOW
+// ============================================================================
+
+window.v1013StartGuestEvent = function(eventId){
+  const e=(db.studio_events||[]).find(x=>String(x.id)===String(eventId));
+  if(!e)return alert('Event not found.');
+
+  const me=myClient();
+  if(!me)return alert('Client account not ready. Refresh and try again.');
+
+  const eligible=(db.classes||[])
+    .filter(c=>
+      !c.cancelled &&
+      !clientClassIsPast(c) &&
+      !clientBookingClosed(c) &&
+      c.class_date>=e.start_date &&
+      c.class_date<=e.end_date &&
+      (e.studio_scope==='Both'||(c.studio_type||'Pilates')===e.studio_scope)
+    )
+    .filter(c=>!db.bookings.some(b=>
+      String(b.class_id)===String(c.id) &&
+      String(b.client_id)===String(me.id) &&
+      b.status!=='cancelled'
+    ))
+    .filter(c=>{
+      const occupied=ctClassOccupiedCountIncludingGuests(c.id);
+      return Number(c.capacity||0)-occupied>=2;
+    })
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card" style="margin-bottom:14px">
+      <b>You + 1 guest</b>
+      <p style="margin:6px 0 0">
+        This booking reserves <b>2 spots in the same class</b>.
+      </p>
+    </div>
+
+    ${eligible.length?`
+      <label>Class</label>
+      <select id="v1013GuestClass">
+        ${eligible.map(c=>`
+          <option value="${c.id}">
+            ${esc(new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))}
+            · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+            · ${esc(c.class_type||'Class')}
+            · ${esc(c.studio_type||'Pilates')}
+          </option>
+        `).join('')}
+      </select>
+
+      <label>Guest full name</label>
+      <input id="v1013GuestName" placeholder="Guest full name" autocomplete="name">
+
+      <label>Guest phone</label>
+      <input id="v1013GuestPhone" type="tel" placeholder="Guest phone number" autocomplete="tel">
+
+      <button class="btn primary full" onclick="window.v1013ContinueGuestEvent('${eventId}')">
+        Continue
+      </button>
+    `:`
+      <div class="warning">
+        No eligible class currently has 2 available spots during this event.
+      </div>
+    `}
+  `);
+};
+
+window.v1013ContinueGuestEvent = function(eventId){
+  const classId=$("#v1013GuestClass")?.value||'';
+  const guestName=($("#v1013GuestName")?.value||'').trim();
+  const guestPhone=($("#v1013GuestPhone")?.value||'').trim();
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  window.v1012ShowPairPackageChoice(eventId,classId,guestName,guestPhone);
+};
+
+window.v1013LegacyGuestClick = function(eventId){
+  const classId=$("#guestClass")?.value||'';
+  const guestName=($("#guestName")?.value||'').trim();
+  const guestPhone=($("#guestPhone")?.value||'').trim();
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  window.v1012ShowPairPackageChoice(eventId,classId,guestName,guestPhone);
+};
+
+
