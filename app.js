@@ -8382,3 +8382,642 @@ function bookingsadmin(){
 }
 
 
+
+// ============================================================================
+// CORE THEORY V10.0.4 — EVENT GUESTS INCLUDED IN BOOKINGS
+// ============================================================================
+
+function ctGuestBookingsForClass(classId){
+  return (db.guest_bookings||[]).filter(g =>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  );
+}
+
+function ctClassHasAnyBooking(classId){
+  return activeBookings(classId).length>0 || ctGuestBookingsForClass(classId).length>0;
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  const guests=ctGuestBookingsForClass(classId);
+
+  return {
+    total:rows.length+guests.length,
+    clientTotal:rows.length,
+    guestTotal:guests.length,
+    booked:rows.filter(b=>b.status==='booked').length
+      +guests.filter(g=>g.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length
+      +guests.filter(g=>g.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length
+      +guests.filter(g=>g.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+      +guests.filter(g=>g.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const clientNames=activeBookings(classId).map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+
+  const guestNames=ctGuestBookingsForClass(classId).map(g=>{
+    const guest=(db.guest_profiles||[]).find(x=>
+      String(x.id)===String(g.guest_id||g.guest_profile_id||'')
+    );
+
+    const name=
+      g.guest_name ||
+      guest?.name ||
+      guest?.full_name ||
+      'Guest';
+
+    const host=
+      g.host_name ||
+      guest?.host_name ||
+      '';
+
+    return `Guest: ${name}${host?` · invited by ${host}`:''}`;
+  });
+
+  const names=[...clientNames,...guestNames];
+
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+function ctOwnerBookingsFilteredClasses(){
+  const startToday=new Date(today()+'T00:00:00');
+  const endToday=new Date(today()+'T23:59:59');
+
+  return (db.classes||[])
+    .filter(c=>!c.cancelled)
+    .filter(c=>ctClassHasAnyBooking(c.id))
+    .filter(c=>{
+      const dt=ctClassDateTime(c);
+      if(ownerBookingsFilter==='today')return dt>=startToday&&dt<=endToday;
+      if(ownerBookingsFilter==='upcoming')return dt>=startToday;
+      if(ownerBookingsFilter==='past')return dt<startToday;
+      return true;
+    })
+    .filter(c=>ownerBookingsStudio==='All'||(c.studio_type||'Pilates')===ownerBookingsStudio)
+    .filter(c=>{
+      const q=String(ownerBookingsSearch||'').trim().toLowerCase();
+      if(!q)return true;
+
+      const names=ctBookingClientNames(c.id,999).toLowerCase();
+
+      return [
+        c.class_type,
+        c.level,
+        c.instructor,
+        c.class_date,
+        c.class_time,
+        c.studio_type,
+        names
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a,b)=>{
+      const av=ctClassDateTime(a).getTime();
+      const bv=ctClassDateTime(b).getTime();
+      return ownerBookingsFilter==='past'?bv-av:av-bv;
+    });
+}
+
+function bookingsadmin(){
+  if(!isOwner())return schedule();
+
+  const classes=ctOwnerBookingsFilteredClasses();
+  const allWithBookings=(db.classes||[]).filter(c=>!c.cancelled&&ctClassHasAnyBooking(c.id));
+
+  const todayCount=allWithBookings.filter(c=>c.class_date===today()).length;
+  const futureCount=allWithBookings.filter(c=>ctClassDateTime(c)>=new Date(today()+'T00:00:00')).length;
+  const pendingPayments=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).pending,0);
+  const eventGuests=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).guestTotal,0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi">
+        <div class="label">Classes with bookings today</div>
+        <div class="value">${todayCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Upcoming booked classes</div>
+        <div class="value">${futureCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Event guests</div>
+        <div class="value">${eventGuests}</div>
+        <small>${pendingPayments} payment pending</small>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div>
+          <label class="muted">When</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsFilter==='upcoming'?'active':''}" onclick="ownerBookingsSetFilter('upcoming')">Upcoming</button>
+            <button class="tab ${ownerBookingsFilter==='today'?'active':''}" onclick="ownerBookingsSetFilter('today')">Today</button>
+            <button class="tab ${ownerBookingsFilter==='past'?'active':''}" onclick="ownerBookingsSetFilter('past')">Past</button>
+            <button class="tab ${ownerBookingsFilter==='all'?'active':''}" onclick="ownerBookingsSetFilter('all')">All</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="muted">Studio</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsStudio==='All'?'active':''}" onclick="ownerBookingsSetStudio('All')">All</button>
+            <button class="tab ${ownerBookingsStudio==='Pilates'?'active':''}" onclick="ownerBookingsSetStudio('Pilates')">Pilates</button>
+            <button class="tab ${ownerBookingsStudio==='Megacore'?'active':''}" onclick="ownerBookingsSetStudio('Megacore')">Megacore</button>
+          </div>
+        </div>
+
+        <div style="min-width:220px;flex:1">
+          <label class="muted">Search class, client or guest</label>
+          <input
+            value="${esc(ownerBookingsSearch)}"
+            placeholder="Class name, client or guest"
+            oninput="ownerBookingsSearchChanged(this.value)"
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    ${classes.length?`
+      <div class="card" style="padding:0;overflow:hidden">
+        ${classes.map(c=>{
+          const s=ctBookingClassStats(c.id);
+          const date=new Date(c.class_date+'T12:00:00');
+          const isToday=c.class_date===today();
+          const subName=typeof ctSubstituteDisplayNameForClass==='function'
+            ?ctSubstituteDisplayNameForClass(c)
+            :null;
+          const instructor=subName||c.instructor||'No instructor';
+
+          return `
+            <div
+              class="booking-person"
+              style="padding:16px 18px;border-bottom:1px solid rgba(0,0,0,.08);cursor:pointer;align-items:center"
+              onclick="openClass('${c.id}')"
+            >
+              <span style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                  <b style="font-size:16px">${esc(c.class_type||'Class')}</b>
+                  <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+                  <span class="badge">${esc(c.studio_type||'Pilates')}</span>
+                  ${s.guestTotal?`<span class="badge good">${s.guestTotal} event guest${s.guestTotal===1?'':'s'}</span>`:''}
+                  ${isToday?'<span class="badge good">Today</span>':''}
+                </div>
+
+                <small style="display:block;margin-top:5px">
+                  ${date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}
+                  · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+                  · ${esc(instructor)}
+                </small>
+
+                <small class="muted" style="display:block;margin-top:5px">
+                  ${esc(ctBookingClientNames(c.id))}
+                </small>
+              </span>
+
+              <span style="text-align:right;min-width:145px">
+                <b>${s.total}/${Number(c.capacity||0)} booked</b>
+                <small style="display:block;margin-top:5px">
+                  ${s.clientTotal} client${s.clientTotal===1?'':'s'}
+                  ${s.guestTotal?` · ${s.guestTotal} guest${s.guestTotal===1?'':'s'}`:''}
+                </small>
+                <small style="display:block;margin-top:4px">
+                  ${s.checked?`${s.checked} checked in · `:''}${s.waitlist?`${s.waitlist} waitlist · `:''}${s.pending?`<b>${s.pending} payment pending</b>`:'Paid/valid'}
+                </small>
+                <button class="btn small" style="margin-top:8px" onclick="event.stopPropagation();openClass('${c.id}')">
+                  View roster
+                </button>
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `:`
+      <div class="card empty">
+        No classes with client or event-guest bookings match these filters.
+      </div>
+    `}
+  `,
+  'Bookings',
+  'Client bookings and event guests together. Open a class to see the complete roster.');
+}
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.5 — BRING-A-FRIEND BOOKING = CLIENT + GUEST TOGETHER
+// ============================================================================
+
+function ctGuestPassEventForClass(cl){
+  if(!cl)return null;
+
+  return (db.studio_events||[]).find(e=>
+    !e.archived_at &&
+    e.active &&
+    e.event_type==='guest_pass' &&
+    e.start_date<=cl.class_date &&
+    e.end_date>=cl.class_date &&
+    (e.studio_scope==='Both' || e.studio_scope===(cl.studio_type||'Pilates')) &&
+    (!e.audience || e.audience==='Clients' || e.audience==='Everyone')
+  ) || null;
+}
+
+function ctClassOccupiedCountIncludingGuests(classId){
+  const normal=(db.bookings||[]).filter(b=>
+    String(b.class_id)===String(classId) &&
+    !['cancelled'].includes(b.status)
+  ).length;
+
+  const guests=(db.guest_bookings||[]).filter(g=>
+    String(g.class_id)===String(classId) &&
+    g.status!=='cancelled'
+  ).length;
+
+  return normal+guests;
+}
+
+function clientBook(classId){
+  const c=myClient();
+  const cl=db.classes.find(x=>String(x.id)===String(classId));
+
+  if(!c||!cl)return alert('Booking details are not ready. Refresh and try again.');
+  if(clientClassIsPast(cl))return alert('This class has already started.');
+  if(clientBookingClosed(cl))return alert('Online booking closes 1 hour before class. Please contact Core Theory directly if you need help.');
+
+  if(db.bookings.some(b=>
+    String(b.class_id)===String(classId) &&
+    String(b.client_id)===String(c.id) &&
+    b.status!=='cancelled'
+  )){
+    return alert('You are already booked.');
+  }
+
+  const guestEvent=ctGuestPassEventForClass(cl);
+  const occupied=ctClassOccupiedCountIncludingGuests(classId);
+  const capacity=Number(cl.capacity||0);
+  const spotsLeft=Math.max(0,capacity-occupied);
+  const spotsNeeded=guestEvent?2:1;
+
+  if(spotsLeft<spotsNeeded){
+    return alert(
+      guestEvent
+        ?'This Bring-a-Friend booking needs 2 available spots, and there are not enough spots left.'
+        :'This class is full.'
+    );
+  }
+
+  const classScope=cl.studio_type||'Pilates';
+  const eligible=packageSortForClient(db.memberships.filter(m=>packageEligible(m,cl)));
+  const exact=eligible.filter(m=>(m.studio_scope||'Both')===classScope);
+  const mix=eligible.filter(m=>(m.studio_scope||'Both')==='Both');
+
+  const rewards=db.client_rewards.filter(r=>
+    String(r.client_id)===String(c.id) &&
+    r.status==='active' &&
+    Number(r.sessions_remaining)>0 &&
+    r.valid_from<=today() &&
+    r.valid_until>=today() &&
+    (r.studio_scope==='Both'||r.studio_scope===classScope)
+  );
+
+  const currentOk=
+    (Number(c.sessions)===999||Number(c.sessions)>0) &&
+    (!c.package_scope||c.package_scope==='Both'||c.package_scope===classScope);
+
+  const option=(m)=>`
+    <option value="buy:${m.id}">
+      ${esc(m.name)} · ${esc(packageScopeLabel(m.studio_scope||'Both'))}
+      · ${m.sessions===999?'Unlimited':m.sessions+' sessions'}
+      · ${money(m.price)}
+    </option>`;
+
+  modal(
+    guestEvent?'Book for 2 · Bring a Friend':'How would you like to book?',
+    `
+      <div class="card" style="margin-bottom:12px">
+        <b>${esc(cl.class_type)}</b>
+        <p class="muted">
+          ${esc(classScope)} · ${esc(cl.class_date)}
+          · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+        </p>
+
+        ${guestEvent?`
+          <div class="notice" style="margin-top:10px">
+            <b>${esc(guestEvent.title||'Bring a Friend')}</b>
+            <p style="margin:5px 0 0">
+              This booking reserves <b>2 spots</b>: one for you and one free guest.
+              Your package/reward is used only for your own spot.
+            </p>
+          </div>
+        `:''}
+      </div>
+
+      <label>Booking option</label>
+      <select id="bookPackage">
+        ${rewards.map(r=>`
+          <option value="reward:${r.id}">
+            ${esc(r.title)} · ${esc(packageScopeLabel(r.studio_scope||'Both'))} · FREE
+          </option>
+        `).join('')}
+
+        ${currentOk?`
+          <option value="current">
+            Use current package · ${esc(packageScopeLabel(c.package_scope||'Both'))}
+            · ${c.sessions===999?'Unlimited':c.sessions+' sessions left'}
+          </option>
+        `:''}
+
+        ${exact.length?`
+          <optgroup label="${esc(classScope)} packages">
+            ${exact.map(option).join('')}
+          </optgroup>
+        `:''}
+
+        ${mix.length?`
+          <optgroup label="Mix packages">
+            ${mix.map(option).join('')}
+          </optgroup>
+        `:''}
+      </select>
+
+      <label>Coupon code <span class="muted">(optional, when buying a package)</span></label>
+      <input id="bookCoupon" placeholder="Enter coupon code">
+
+      ${guestEvent?`
+        <div class="card" style="margin-top:14px">
+          <h3 style="margin-top:0">Guest information</h3>
+
+          <label>Guest full name</label>
+          <input id="eventGuestName" autocomplete="name" placeholder="Guest full name" required>
+
+          <label>Guest phone</label>
+          <input id="eventGuestPhone" type="tel" autocomplete="tel" placeholder="Guest phone number" required>
+
+          <p class="muted">
+            The guest will be added to this same class and will count toward class capacity.
+          </p>
+        </div>
+      `:''}
+
+      <button class="btn primary full" onclick="confirmClientBooking('${classId}')">
+        ${guestEvent?'Continue · Book 2 spots':'Confirm booking'}
+      </button>
+    `
+  );
+}
+
+function confirmClientBooking(classId){
+  const choice=$("#bookPackage")?.value||'';
+  const coupon=$("#bookCoupon")?.value.trim()||'';
+  const cl=db.classes.find(x=>String(x.id)===String(classId));
+
+  if(!cl)return alert('Class not found.');
+  if(!choice)return alert('Choose how you would like to book.');
+
+  const guestEvent=ctGuestPassEventForClass(cl);
+
+  let guestName='';
+  let guestPhone='';
+
+  if(guestEvent){
+    guestName=($("#eventGuestName")?.value||'').trim();
+    guestPhone=($("#eventGuestPhone")?.value||'').trim();
+
+    if(!guestName)return alert('Enter your guest’s full name.');
+    if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+    const occupied=ctClassOccupiedCountIncludingGuests(classId);
+    if(Number(cl.capacity||0)-occupied<2){
+      return alert('There are no longer 2 spots available for you and your guest.');
+    }
+  }
+
+  if(choice.startsWith('buy:')){
+    const membershipId=choice.split(':')[1];
+    const m=db.memberships.find(x=>String(x.id)===String(membershipId));
+
+    if(!m)return alert('Package not found.');
+
+    const classScope=cl.studio_type||'Pilates';
+
+    if(!(
+      (m.studio_scope||'Both')==='Both' ||
+      (m.studio_scope||'Both')===classScope
+    )){
+      return alert(
+        `This ${packageScopeLabel(m.studio_scope||'Both')} package cannot be used for a ${classScope} class.`
+      );
+    }
+
+    modal('Confirm booking',`
+      <div class="card" style="margin-bottom:12px">
+        <b>${esc(cl.class_type)}</b>
+        <p class="muted">
+          ${esc(classScope)} · ${esc(cl.class_date)}
+          · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+        </p>
+      </div>
+
+      ${guestEvent?`
+        <div class="notice card" style="margin-bottom:12px">
+          <b>2 spots will be reserved</b>
+          <p>You + <b>${esc(guestName)}</b></p>
+          <small>${esc(guestPhone)}</small>
+        </div>
+      `:''}
+
+      ${packageSummaryHtml(m)}
+      ${coupon?`<p><b>Coupon:</b> ${esc(coupon)}</p>`:''}
+
+      <p class="muted">
+        Your package request remains Payment Pending until Core Theory collects payment.
+        ${guestEvent?'Your guest is free under the event.':''}
+      </p>
+
+      <button
+        class="btn primary full"
+        onclick="submitClientBooking(
+          '${classId}',
+          '${choice}',
+          '${encodeURIComponent(coupon)}',
+          '${guestEvent?.id||''}',
+          '${encodeURIComponent(guestName)}',
+          '${encodeURIComponent(guestPhone)}'
+        )"
+      >
+        ${guestEvent?'Confirm 2-person booking':'Confirm booking'}
+      </button>
+
+      <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">
+        Change option
+      </button>
+    `);
+
+    return;
+  }
+
+  const c=myClient();
+  const text=choice==='current'
+    ?`Use current package · ${packageScopeLabel(c?.package_scope||'Both')} · ${c?.sessions===999?'Unlimited':(c?.sessions??0)+' sessions left'}`
+    :'Use free reward';
+
+  modal('Confirm booking',`
+    <div class="card" style="margin-bottom:12px">
+      <b>${esc(cl.class_type)}</b>
+      <p class="muted">
+        ${esc(cl.studio_type||'Pilates')} · ${esc(cl.class_date)}
+        · ${formatTime(String(cl.class_time||'00:00').slice(0,5))}
+      </p>
+    </div>
+
+    ${guestEvent?`
+      <div class="notice card" style="margin-bottom:12px">
+        <b>Bring a Friend · 2 spots</b>
+        <p>You + <b>${esc(guestName)}</b></p>
+        <small>${esc(guestPhone)}</small>
+      </div>
+    `:''}
+
+    <p><b>${esc(text)}</b></p>
+
+    <button
+      class="btn primary full"
+      onclick="submitClientBooking(
+        '${classId}',
+        '${choice}',
+        '',
+        '${guestEvent?.id||''}',
+        '${encodeURIComponent(guestName)}',
+        '${encodeURIComponent(guestPhone)}'
+      )"
+    >
+      ${guestEvent?'Confirm 2-person booking':'Confirm booking'}
+    </button>
+
+    <button class="btn full" onclick="$('#modal').remove();clientBook('${classId}')">
+      Change option
+    </button>
+  `);
+}
+
+async function submitClientBooking(
+  classId,
+  choice,
+  couponEncoded,
+  eventId='',
+  guestNameEncoded='',
+  guestPhoneEncoded=''
+){
+  const coupon=decodeURIComponent(couponEncoded||'');
+  const guestName=decodeURIComponent(guestNameEncoded||'');
+  const guestPhone=decodeURIComponent(guestPhoneEncoded||'');
+
+  let membershipId=null;
+  let rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];
+  else if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];
+
+  const btn=document.querySelector('#modal .btn.primary');
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking…';
+  }
+
+  const rpc=eventId?'book_class_with_event_guest':'book_class_v3';
+
+  const args=eventId
+    ?{
+        p_class_id:String(classId),
+        p_membership_id:membershipId,
+        p_coupon_code:coupon||null,
+        p_reward_id:rewardId,
+        p_event_id:String(eventId),
+        p_guest_name:guestName,
+        p_guest_phone:guestPhone
+      }
+    :{
+        p_class_id:String(classId),
+        p_membership_id:membershipId,
+        p_coupon_code:coupon||null,
+        p_reward_id:rewardId
+      };
+
+  const {data,error}=await sb.rpc(rpc,args);
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=eventId?'Confirm 2-person booking':'Confirm booking';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  if(eventId){
+    return alert(
+      membershipId
+        ?'You and your guest are booked in the same class. Your package payment is pending.'
+        :'You and your guest are booked in the same class.'
+    );
+  }
+
+  const status=data?.status||'booked';
+  const pay=data?.payment_status||'paid';
+
+  if(status==='waitlist'){
+    return alert(
+      pay==='pending'
+        ?'Added to waitlist. Package payment is pending.'
+        :'Added to waitlist.'
+    );
+  }
+
+  if(rewardId)return alert('Booked with your free reward!');
+  if(membershipId&&pay==='pending')return alert('Class booked. Package payment is pending.');
+
+  alert('Class booked.');
+}
+
+
+// The old Home-page event button no longer creates a separate guest-only booking.
+// It directs the client to book the class, where guest details are collected together.
+function guestEventModal(eventId){
+  const e=db.studio_events.find(x=>String(x.id)===String(eventId));
+  if(!e)return;
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card">
+      <b>Book together</b>
+      <p>
+        During this event, choose an eligible class from <b>Book a Class</b>.
+        Core Theory will reserve 2 spots together: one for you and one for your guest.
+      </p>
+      <p class="muted">
+        You will enter your guest’s name and phone number before confirming.
+      </p>
+    </div>
+
+    <button class="btn primary full" onclick="$('#modal').remove();page='book';render()">
+      Choose a class
+    </button>
+  `);
+}
+
+
