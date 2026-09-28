@@ -8094,3 +8094,291 @@ async function submitClientBooking(classId,choice,couponEncoded){
 }
 
 
+
+// ============================================================================
+// CORE THEORY V10.0.3 — OWNER BOOKINGS PAGE
+// ============================================================================
+
+let ownerBookingsFilter='upcoming';
+let ownerBookingsStudio='All';
+let ownerBookingsSearch='';
+
+function nav(){
+  const pages=isOwner()
+    ?['dashboard','clients','schedule','bookingsadmin','pos','memberships','inventory','expenses','finance','team','operations','settings']
+    :isInstructor()
+      ?['instructorhome','schedule',...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']
+      :isReceptionist()
+        ?[...(db.frontDeskDuty?['frontdesk','pos']:[]),'account']
+        :['clienthome','book','mybookings','packages','clientaccount'];
+
+  const labels={
+    dashboard:'⌂ Dashboard',
+    instructorhome:'⌂ Home',
+    clienthome:'⌂ Home',
+    clients:'◎ Clients',
+    schedule:'□ Schedule',
+    bookingsadmin:'✓ Bookings',
+    pos:'$ POS / Sales',
+    memberships:'◇ Memberships',
+    inventory:'▣ Inventory',
+    expenses:'− Expenses',
+    finance:'↗ Finance',
+    team:'◌ Team',
+    operations:'✦ Operations',
+    settings:'⚙ Settings',
+    payment:'$ Record Payment',
+    frontdesk:'$ Front Desk',
+    account:'⚙ Account',
+    book:'□ Book a Class',
+    mybookings:'✓ My Bookings',
+    packages:'◇ Packages',
+    clientaccount:'◎ My Account'
+  };
+
+  return pages.map(x=>`
+    <button data-page="${x}" class="${page===x?'active':''}">
+      ${labels[x]}
+    </button>
+  `).join('')
+  +(isOwner()
+    ?db.custom_sections
+      .filter(x=>x.visible_owner!==false)
+      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0))
+      .map(x=>`
+        <button data-custom="${x.id}" class="${page==='custom:'+x.id?'active':''}">
+          ${esc(x.icon||'•')} ${esc(x.name)}
+        </button>
+      `).join('')
+    :'');
+}
+
+function render(){
+  if(page.startsWith('custom:'))return customSectionPage(page.split(':')[1]);
+
+  const f={
+    dashboard,
+    instructorhome,
+    clienthome,
+    clients,
+    schedule,
+    bookingsadmin,
+    pos,
+    memberships,
+    inventory,
+    expenses,
+    finance,
+    team,
+    operations,
+    settings,
+    payment,
+    frontdesk,
+    account,
+    book,
+    mybookings,
+    packages,
+    clientaccount
+  }[page];
+
+  (f||schedule)();
+}
+
+function ctClassDateTime(c){
+  return new Date(`${c.class_date}T${String(c.class_time||'00:00').slice(0,8)}`);
+}
+
+function ctBookingClassStats(classId){
+  const rows=activeBookings(classId);
+  return {
+    total:rows.length,
+    booked:rows.filter(b=>b.status==='booked').length,
+    checked:rows.filter(b=>b.status==='checked_in').length,
+    waitlist:rows.filter(b=>b.status==='waitlist').length,
+    pending:rows.filter(b=>b.payment_status==='pending').length,
+    noShow:rows.filter(b=>b.status==='no_show').length
+  };
+}
+
+function ctBookingClientNames(classId,limit=3){
+  const rows=activeBookings(classId);
+  const names=rows.map(b=>{
+    const c=db.clients.find(x=>String(x.id)===String(b.client_id));
+    return c?.name||'Client';
+  });
+  if(names.length<=limit)return names.join(', ');
+  return `${names.slice(0,limit).join(', ')} +${names.length-limit} more`;
+}
+
+function ctOwnerBookingsFilteredClasses(){
+  const now=new Date();
+  const startToday=new Date(today()+'T00:00:00');
+  const endToday=new Date(today()+'T23:59:59');
+
+  return (db.classes||[])
+    .filter(c=>!c.cancelled)
+    .filter(c=>bookingCount(c.id)>0)
+    .filter(c=>{
+      const dt=ctClassDateTime(c);
+      if(ownerBookingsFilter==='today')return dt>=startToday&&dt<=endToday;
+      if(ownerBookingsFilter==='upcoming')return dt>=startToday;
+      if(ownerBookingsFilter==='past')return dt<startToday;
+      return true;
+    })
+    .filter(c=>ownerBookingsStudio==='All'||(c.studio_type||'Pilates')===ownerBookingsStudio)
+    .filter(c=>{
+      const q=String(ownerBookingsSearch||'').trim().toLowerCase();
+      if(!q)return true;
+      const names=ctBookingClientNames(c.id,999).toLowerCase();
+      return [
+        c.class_type,
+        c.level,
+        c.instructor,
+        c.class_date,
+        c.class_time,
+        c.studio_type,
+        names
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a,b)=>{
+      const av=ctClassDateTime(a).getTime();
+      const bv=ctClassDateTime(b).getTime();
+      return ownerBookingsFilter==='past'?bv-av:av-bv;
+    });
+}
+
+function ownerBookingsSetFilter(value){
+  ownerBookingsFilter=value;
+  bookingsadmin();
+}
+
+function ownerBookingsSetStudio(value){
+  ownerBookingsStudio=value;
+  bookingsadmin();
+}
+
+function ownerBookingsSearchChanged(value){
+  ownerBookingsSearch=value;
+  bookingsadmin();
+}
+
+function bookingsadmin(){
+  if(!isOwner())return schedule();
+
+  const classes=ctOwnerBookingsFilteredClasses();
+  const allWithBookings=(db.classes||[]).filter(c=>!c.cancelled&&bookingCount(c.id)>0);
+  const todayCount=allWithBookings.filter(c=>c.class_date===today()).length;
+  const futureCount=allWithBookings.filter(c=>ctClassDateTime(c)>=new Date(today()+'T00:00:00')).length;
+  const pendingPayments=allWithBookings.reduce((n,c)=>n+ctBookingClassStats(c.id).pending,0);
+
+  layout(`
+    <div class="grid three">
+      <div class="card kpi">
+        <div class="label">Classes with bookings today</div>
+        <div class="value">${todayCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Upcoming booked classes</div>
+        <div class="value">${futureCount}</div>
+      </div>
+      <div class="card kpi">
+        <div class="label">Payment pending bookings</div>
+        <div class="value">${pendingPayments}</div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <div class="toolbar" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div>
+          <label class="muted">When</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsFilter==='upcoming'?'active':''}" onclick="ownerBookingsSetFilter('upcoming')">Upcoming</button>
+            <button class="tab ${ownerBookingsFilter==='today'?'active':''}" onclick="ownerBookingsSetFilter('today')">Today</button>
+            <button class="tab ${ownerBookingsFilter==='past'?'active':''}" onclick="ownerBookingsSetFilter('past')">Past</button>
+            <button class="tab ${ownerBookingsFilter==='all'?'active':''}" onclick="ownerBookingsSetFilter('all')">All</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="muted">Studio</label>
+          <div class="schedule-tabs" style="margin-top:5px">
+            <button class="tab ${ownerBookingsStudio==='All'?'active':''}" onclick="ownerBookingsSetStudio('All')">All</button>
+            <button class="tab ${ownerBookingsStudio==='Pilates'?'active':''}" onclick="ownerBookingsSetStudio('Pilates')">Pilates</button>
+            <button class="tab ${ownerBookingsStudio==='Megacore'?'active':''}" onclick="ownerBookingsSetStudio('Megacore')">Megacore</button>
+          </div>
+        </div>
+
+        <div style="min-width:220px;flex:1">
+          <label class="muted">Search class or client</label>
+          <input
+            value="${esc(ownerBookingsSearch)}"
+            placeholder="Class name, instructor or client"
+            oninput="ownerBookingsSearchChanged(this.value)"
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    ${classes.length?`
+      <div class="card" style="padding:0;overflow:hidden">
+        ${classes.map(c=>{
+          const s=ctBookingClassStats(c.id);
+          const date=new Date(c.class_date+'T12:00:00');
+          const isToday=c.class_date===today();
+          const subName=typeof ctSubstituteDisplayNameForClass==='function'
+            ?ctSubstituteDisplayNameForClass(c)
+            :null;
+          const instructor=subName||c.instructor||'No instructor';
+
+          return `
+            <div
+              class="booking-person"
+              style="padding:16px 18px;border-bottom:1px solid rgba(0,0,0,.08);cursor:pointer;align-items:center"
+              onclick="openClass('${c.id}')"
+            >
+              <span style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                  <b style="font-size:16px">${esc(c.class_type||'Class')}</b>
+                  <span class="badge" style="background:${levelColor(c.level)}">${esc(c.level||'Open Level')}</span>
+                  <span class="badge">${esc(c.studio_type||'Pilates')}</span>
+                  ${isToday?'<span class="badge good">Today</span>':''}
+                </div>
+
+                <small style="display:block;margin-top:5px">
+                  ${date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}
+                  · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+                  · ${esc(instructor)}
+                </small>
+
+                <small class="muted" style="display:block;margin-top:5px">
+                  ${esc(ctBookingClientNames(c.id))}
+                </small>
+              </span>
+
+              <span style="text-align:right;min-width:130px">
+                <b>${s.total}/${Number(c.capacity||0)} booked</b>
+                <small style="display:block;margin-top:5px">
+                  ${s.checked?`${s.checked} checked in · `:''}${s.waitlist?`${s.waitlist} waitlist · `:''}${s.pending?`<b>${s.pending} payment pending</b>`:'Paid/valid'}
+                </small>
+                <button class="btn small" style="margin-top:8px" onclick="event.stopPropagation();openClass('${c.id}')">
+                  View bookings
+                </button>
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `:`
+      <div class="card empty">
+        No classes with bookings match these filters.
+      </div>
+    `}
+  `,
+  'Bookings',
+  'Every class that currently has a booking. Open a class to see the full roster, attendance and payment status.');
+}
+
+
