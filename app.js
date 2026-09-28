@@ -8041,3 +8041,56 @@ function v10PackageStatusLabel(status){
 }
 
 
+
+// ============================================================================
+// V10.0.1 BOOKING RPC COMPATIBILITY HOTFIX
+// Database currently exposes the 4-argument book_class_v3 RPC.
+// Keep V10 confirmation UI, but call the deployed RPC signature.
+// ============================================================================
+
+async function submitClientBooking(classId,choice,couponEncoded){
+  const coupon=decodeURIComponent(couponEncoded||'');
+  let membershipId=null,rewardId=null;
+
+  if(choice.startsWith('buy:'))membershipId=choice.split(':')[1];
+  else if(choice.startsWith('reward:'))rewardId=choice.split(':')[1];
+
+  const btn=document.querySelector('#modal .btn.primary');
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Booking…';
+  }
+
+  const {data,error}=await sb.rpc('book_class_v3',{
+    p_class_id:String(classId),
+    p_membership_id:membershipId,
+    p_coupon_code:coupon||null,
+    p_reward_id:rewardId
+  });
+
+  if(error){
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='Confirm booking';
+    }
+    return alert(error.message);
+  }
+
+  $("#modal")?.remove();
+  await loadAll();
+
+  const status=data?.status||'booked';
+  const pay=data?.payment_status||'paid';
+
+  if(status==='waitlist'){
+    return alert(pay==='pending'
+      ?'Added to waitlist. Package payment is pending.'
+      :'Added to waitlist.');
+  }
+
+  if(rewardId)return alert('Booked with your free reward!');
+  if(membershipId && pay==='pending')return alert('Class booked. Package payment is pending.');
+  alert('Class booked.');
+}
+
+
