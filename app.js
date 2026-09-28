@@ -9421,3 +9421,155 @@ function ctBookingClientNames(classId,limit=3){
 // The server now verifies the CLIENT booking exists before creating the guest.
 // This prevents a guest-only event reservation.
 // ============================================================================
+
+
+
+// ============================================================================
+// CORE THEORY V10.0.8 — HOME PAGE BRING-A-GUEST FLOW
+// Clicking the event on Client Home starts a true 2-person booking flow.
+// ============================================================================
+
+let ctSelectedGuestEventId='';
+
+const ctV108BaseGuestEventForClass = ctGuestPassEventForClass;
+
+ctGuestPassEventForClass = function(cl){
+  if(!cl)return null;
+
+  if(ctSelectedGuestEventId){
+    const selected=(db.studio_events||[]).find(e=>
+      String(e.id)===String(ctSelectedGuestEventId) &&
+      !e.archived_at &&
+      e.active &&
+      e.event_type==='guest_pass' &&
+      e.start_date<=cl.class_date &&
+      e.end_date>=cl.class_date &&
+      (e.studio_scope==='Both' || e.studio_scope===(cl.studio_type||'Pilates')) &&
+      (!e.audience || e.audience==='Clients' || e.audience==='Everyone')
+    );
+    if(selected)return selected;
+  }
+
+  return ctV108BaseGuestEventForClass(cl);
+};
+
+function guestEventModal(eventId){
+  const e=(db.studio_events||[]).find(x=>String(x.id)===String(eventId));
+  if(!e)return;
+
+  const eligible=(db.classes||[])
+    .filter(c=>
+      !c.cancelled &&
+      !clientClassIsPast(c) &&
+      !clientBookingClosed(c) &&
+      c.class_date>=e.start_date &&
+      c.class_date<=e.end_date &&
+      (e.studio_scope==='Both'||(c.studio_type||'Pilates')===e.studio_scope)
+    )
+    .filter(c=>{
+      const cClient=myClient();
+      return !db.bookings.some(b=>
+        String(b.class_id)===String(c.id) &&
+        String(b.client_id)===String(cClient?.id) &&
+        b.status!=='cancelled'
+      );
+    })
+    .filter(c=>{
+      const occupied=ctClassOccupiedCountIncludingGuests(c.id);
+      return Number(c.capacity||0)-occupied>=2;
+    })
+    .sort((a,b)=>(a.class_date+a.class_time).localeCompare(b.class_date+b.class_time));
+
+  modal(e.title||'Bring a Friend',`
+    <div class="notice card" style="margin-bottom:14px">
+      <b>Book yourself + 1 guest</b>
+      <p style="margin:6px 0 0">
+        This reserves <b>2 spots in the same class</b>: one for you and one free guest.
+      </p>
+    </div>
+
+    ${eligible.length?`
+      <label>Choose your class</label>
+      <select id="homeGuestClass">
+        ${eligible.map(c=>`
+          <option value="${c.id}">
+            ${esc(new Date(c.class_date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))}
+            · ${formatTime(String(c.class_time||'00:00').slice(0,5))}
+            · ${esc(c.class_type||'Class')}
+            · ${esc(c.studio_type||'Pilates')}
+          </option>
+        `).join('')}
+      </select>
+
+      <label>Guest full name</label>
+      <input id="homeGuestName" autocomplete="name" placeholder="Guest full name">
+
+      <label>Guest phone</label>
+      <input id="homeGuestPhone" type="tel" autocomplete="tel" placeholder="Guest phone number">
+
+      <p class="muted">
+        Your guest is free. Your own package or reward is used only for your spot.
+      </p>
+
+      <button class="btn primary full" onclick="continueHomeGuestBooking('${eventId}')">
+        Continue to booking
+      </button>
+    `:`
+      <div class="warning">
+        There are no eligible classes with 2 available spots during this event right now.
+      </div>
+    `}
+  `);
+}
+
+function continueHomeGuestBooking(eventId){
+  const classId=$("#homeGuestClass")?.value||'';
+  const guestName=($("#homeGuestName")?.value||'').trim();
+  const guestPhone=($("#homeGuestPhone")?.value||'').trim();
+
+  if(!classId)return alert('Choose a class.');
+  if(!guestName)return alert('Enter your guest’s full name.');
+  if(!guestPhone)return alert('Enter your guest’s phone number.');
+
+  ctSelectedGuestEventId=String(eventId);
+
+  $("#modal")?.remove();
+
+  // Open the normal client booking flow for the CLIENT's own spot.
+  // Because the selected event is active, clientBook automatically switches
+  // to the 2-person event flow.
+  clientBook(classId);
+
+  // Pre-fill the guest details the client already entered on Home.
+  const n=$("#eventGuestName");
+  const p=$("#eventGuestPhone");
+
+  if(n)n.value=guestName;
+  if(p)p.value=guestPhone;
+}
+
+const ctV108BaseSubmitClientBooking = submitClientBooking;
+
+submitClientBooking = async function(
+  classId,
+  choice,
+  couponEncoded,
+  eventId='',
+  guestNameEncoded='',
+  guestPhoneEncoded=''
+){
+  try{
+    return await ctV108BaseSubmitClientBooking(
+      classId,
+      choice,
+      couponEncoded,
+      eventId,
+      guestNameEncoded,
+      guestPhoneEncoded
+    );
+  }finally{
+    ctSelectedGuestEventId='';
+  }
+};
+
+
