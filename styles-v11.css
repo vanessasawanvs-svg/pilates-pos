@@ -49,3 +49,20 @@ button.btn.primary:hover{
   color:inherit !important;
   -webkit-text-fill-color:inherit !important;
 }
+
+
+/* CORE THEORY V11.1.1 — CLIENT HOME CTA VISIBILITY */
+.ct-hero .ct-client-book-btn,
+.ct-hero button.ct-client-book-btn{
+  background:#722F37 !important;
+  color:#FFFFFF !important;
+  -webkit-text-fill-color:#FFFFFF !important;
+  border-color:#722F37 !important;
+}
+.ct-hero .ct-client-book-btn:hover,
+.ct-hero button.ct-client-book-btn:hover{
+  background:#5E2930 !important;
+  color:#FFFFFF !important;
+  -webkit-text-fill-color:#FFFFFF !important;
+  border-color:#5E2930 !important;
+}
