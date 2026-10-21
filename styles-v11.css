@@ -13,27 +13,27 @@ body{background:linear-gradient(180deg,#fbf8f3 0%,#f4efe7 100%)}
 .ct-account-head{display:flex;align-items:center;gap:16px;margin-bottom:18px}.ct-account-head h2{font-family:Georgia,'Times New Roman',serif;font-size:30px;margin:0}.ct-account-head p{margin:4px 0;color:#6B6B6B}.ct-avatar{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:#722F37;color:#fff;font-family:Georgia,'Times New Roman',serif;font-size:28px}
 @media(max-width:760px){.ct-hero{padding:22px;align-items:flex-start;flex-direction:column}.ct-hero h2{font-size:31px}.ct-client-grid{grid-template-columns:1fr}.ct-client-row{grid-template-columns:1fr}.ct-activity{align-items:flex-start;flex-direction:column}.ct-mini-bars{width:100%;min-width:0}.ct-package-card,.ct-next-card{min-height:auto}.ct-hero .btn{width:100%}}
 
-
-/* CORE THEORY V11.0.3 — CONTRAST FIX */
+/* CORE THEORY V11.1 — FINAL CONTRAST RULES */
 .btn.primary,
 button.btn.primary{
   background:#722F37 !important;
   color:#FFFFFF !important;
+  -webkit-text-fill-color:#FFFFFF !important;
   border-color:#722F37 !important;
 }
 .btn.primary:hover,
 button.btn.primary:hover{
   background:#5E2930 !important;
   color:#FFFFFF !important;
+  -webkit-text-fill-color:#FFFFFF !important;
   border-color:#5E2930 !important;
 }
-
-/* Hero CTAs sit on dark/burgundy panels, so use a pale button with dark text. */
 .ct-hero .btn.primary,
 .ct-hero button.btn.primary{
   background:#FFF8EE !important;
   color:#5E2930 !important;
-  border:1px solid rgba(255,255,255,.88) !important;
+  -webkit-text-fill-color:#5E2930 !important;
+  border:1px solid #FFF8EE !important;
   box-shadow:0 4px 14px rgba(0,0,0,.10);
   font-weight:700;
 }
@@ -41,11 +41,11 @@ button.btn.primary:hover{
 .ct-hero button.btn.primary:hover{
   background:#FFFFFF !important;
   color:#4F2229 !important;
+  -webkit-text-fill-color:#4F2229 !important;
   border-color:#FFFFFF !important;
 }
-
-/* Make sure text/icons inside those buttons inherit the visible color. */
 .ct-hero .btn.primary *,
 .btn.primary *{
   color:inherit !important;
+  -webkit-text-fill-color:inherit !important;
 }
