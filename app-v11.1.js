@@ -10716,7 +10716,7 @@ clienthome=function(){
   const notifs=(db.client_notifications||[]).filter(n=>String(n.client_id)===String(c.id)&&!n.dismissed_at);
   const name=(c.name||profile?.full_name||'').split(' ')[0]||'there';
   layout(`
-    <section class="ct-hero"><div><small>WELCOME BACK</small><h2>Hi ${esc(name)}.</h2><p>${esc(ctSmartRecommendation(c.id))}</p></div><button class="btn primary" style="background:#FFF8EE !important;color:#5E2930 !important;-webkit-text-fill-color:#5E2930 !important;border-color:#FFF8EE !important;font-weight:700;" onclick="page='book';render()">Book a class</button></section>
+    <section class="ct-hero"><div><small>WELCOME BACK</small><h2>Hi ${esc(name)}.</h2><p>${esc(ctSmartRecommendation(c.id))}</p></div><button class="btn primary ct-client-book-btn" style="background:#722F37 !important;color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;border-color:#722F37 !important;font-weight:700;" onclick="page='book';render()">Book a class</button></section>
     ${notifs.map(n=>`<div class="notice card ct-soft"><b>${esc(n.title)}</b><p>${esc(n.message)}</p></div>`).join('')}
     <div class="ct-client-grid">
       <div class="card ct-package-card"><div class="ct-card-eyebrow">YOUR PACKAGE</div><h3>${esc(active?.package_name||c.package||'No active package')}</h3>${ctPackageBalanceHtml(active)}<div class="ct-meta">${active?.expiry?'Expires '+esc(active.expiry):'No expiry available'}</div><button class="link-btn" onclick="page='packages';render()">Manage packages →</button></div>
@@ -11071,7 +11071,7 @@ clientBook=function(classId){
 // ============================================================================
 // CORE THEORY V11.0.6 — OWNER MAY REMOVE ANY CLIENT FROM ANY CLASS
 // ============================================================================
-window.CORE_THEORY_VERSION='11.1';
+window.CORE_THEORY_VERSION='11.1.1';
 
 const ctV1106OpenClassBase=openClass;
 openClass=function(id){
@@ -11132,5 +11132,96 @@ window.ctOwnerRemoveBooking=async function(bookingId,classId){
   alert(restored
     ?'Client removed from class and one session was restored.'
     :'Client removed from class.');
+};
+
+
+// ============================================================================
+// CORE THEORY V11.1.2 — FRONT DESK DUTY: CREATE UNREGISTERED CLIENT
+// ============================================================================
+window.CORE_THEORY_VERSION='11.1.2';
+
+const ctV1112FrontdeskBase=frontdesk;
+frontdesk=function(){
+  ctV1112FrontdeskBase();
+
+  if(!isFrontDeskStaff()||!db.frontDeskDuty)return;
+
+  setTimeout(()=>{
+    const selected=document.getElementById('fdSelectedClient');
+    if(!selected || document.getElementById('fdCreateClientBtn'))return;
+
+    const btn=document.createElement('button');
+    btn.id='fdCreateClientBtn';
+    btn.type='button';
+    btn.className='btn';
+    btn.style.marginTop='8px';
+    btn.textContent='+ Create new client';
+    btn.onclick=ctFrontDeskNewClientModal;
+    selected.insertAdjacentElement('afterend',btn);
+  },0);
+};
+
+window.ctFrontDeskNewClientModal=function(){
+  modal('Create new client',`
+    <div class="form">
+      <div class="full">
+        <label>Full name</label>
+        <input id="fdNewClientName" autocomplete="name" placeholder="Client full name">
+      </div>
+      <div>
+        <label>Phone</label>
+        <input id="fdNewClientPhone" type="tel" autocomplete="tel" placeholder="03 123 456">
+      </div>
+      <div>
+        <label>Email <span class="muted">(optional)</span></label>
+        <input id="fdNewClientEmail" type="email" autocomplete="email" placeholder="Optional">
+      </div>
+      <div class="full">
+        <p class="muted">This creates an Unregistered client only. No login account is created.</p>
+        <button class="btn primary full" id="fdCreateClientSave" onclick="ctFrontDeskCreateClient()">Create client</button>
+      </div>
+    </div>
+  `);
+};
+
+window.ctFrontDeskCreateClient=async function(){
+  const name=document.getElementById('fdNewClientName')?.value.trim();
+  const phone=document.getElementById('fdNewClientPhone')?.value.trim();
+  const email=document.getElementById('fdNewClientEmail')?.value.trim().toLowerCase()||null;
+
+  if(!name||!phone)return alert('Full name and phone are required.');
+
+  const btn=document.getElementById('fdCreateClientSave');
+  if(btn){btn.disabled=true;btn.textContent='Creating…';}
+
+  const {data,error}=await sb.rpc('front_desk_create_unregistered_client',{
+    p_name:name,
+    p_phone:phone,
+    p_email:email
+  });
+
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Create client';}
+    return alert(error.message);
+  }
+
+  const result=(Array.isArray(data)?data[0]:data)||{};
+  const id=String(result.id||'');
+  const clientName=String(result.name||name);
+
+  document.getElementById('modal')?.remove();
+
+  fdBookingClient={id,name:clientName};
+  const search=document.getElementById('fdClientSearch');
+  const results=document.getElementById('fdClientSearchResults');
+  const selected=document.getElementById('fdSelectedClient');
+
+  if(search)search.value=clientName;
+  if(results)results.innerHTML='';
+  if(selected)selected.innerHTML=`Selected: <b>${esc(clientName)}</b>`;
+
+  alert(result.created===false
+    ?'A client with this phone already exists. That client has been selected.'
+    :'New client created and selected. You can now add them to the class.');
 };
 
