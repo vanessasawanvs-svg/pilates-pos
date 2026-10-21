@@ -1,5 +1,5 @@
-const CACHE='core-theory-v10-1-7';
-const STATIC_ASSETS=['./styles.css','./manifest.json','./offline.html'];
+const CACHE='core-theory-v11-0-1';
+const STATIC_ASSETS=['./styles.css','./styles-v11.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{
   self.skipWaiting();
