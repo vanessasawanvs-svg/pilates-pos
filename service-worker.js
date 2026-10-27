@@ -1,4 +1,4 @@
-const CACHE='core-theory-v11-1-8-white-portal-logo';
+const CACHE='core-theory-v11-1-11-client-cta';
 const STATIC_ASSETS=['./styles.css','./styles-v11.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{

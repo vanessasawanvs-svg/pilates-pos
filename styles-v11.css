@@ -130,3 +130,59 @@ button.btn.primary:hover{
 .ct-drawer-logo img{
   width:145px !important;
 }
+
+
+/* CORE THEORY V11.1.9 — PREVENT DOUBLE PORTAL LOGO */
+/* Desktop/tablet: show only the desktop sidebar logo */
+@media (min-width:761px){
+  .mobile-drawer-head{
+    display:none !important;
+  }
+  .desktop-brand.ct-logo-brand{
+    display:flex !important;
+  }
+  .mobile-role-label{
+    display:none !important;
+  }
+}
+
+/* Mobile: show only the drawer logo */
+@media (max-width:760px){
+  .mobile-drawer-head{
+    display:flex !important;
+  }
+  .desktop-brand.ct-logo-brand{
+    display:none !important;
+  }
+}
+
+
+/* CORE THEORY V11.1.10 — LOGO ROLE LOCK */
+.auth-brand.ct-logo-brand img{
+  content:url("logo-login-burgundy.png") !important;
+}
+.desktop-brand.ct-logo-brand img,
+.ct-drawer-logo img{
+  content:url("logo-portal-beige.png") !important;
+}
+
+
+/* CORE THEORY V11.1.11 — CLIENT WELCOME CTA */
+.ct-hero .ct-client-book-btn,
+.ct-hero button.ct-client-book-btn{
+  background:#FFFFFF !important;
+  color:#501E27 !important;
+  -webkit-text-fill-color:#501E27 !important;
+  border:1px solid #FFFFFF !important;
+  box-shadow:0 5px 16px rgba(0,0,0,.12) !important;
+  font-weight:700 !important;
+}
+.ct-hero .ct-client-book-btn:hover,
+.ct-hero button.ct-client-book-btn:hover,
+.ct-hero .ct-client-book-btn:focus,
+.ct-hero button.ct-client-book-btn:focus{
+  background:#FFFFFF !important;
+  color:#501E27 !important;
+  -webkit-text-fill-color:#501E27 !important;
+  border-color:#FFFFFF !important;
+}
