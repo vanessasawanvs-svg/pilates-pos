@@ -121,3 +121,12 @@ button.btn.primary:hover{
   height:auto;
   object-fit:contain;
 }
+
+
+/* CORE THEORY V11.1.8 — WHITE PORTAL LOGO */
+.desktop-brand.ct-logo-brand img{
+  width:165px !important;
+}
+.ct-drawer-logo img{
+  width:145px !important;
+}
