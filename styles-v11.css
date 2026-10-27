@@ -1,38 +1,38 @@
 
 /* CORE THEORY V11.0 — editorial polish */
-:root{--ct-burgundy:#501E27;--ct-grey:#6B6B6B;--ct-cream:#EAE1D8;--ct-ink:#000000;--ct-line:rgba(80,30,39,.13)}
-body{background:linear-gradient(180deg,#EAE1D8 0%,#EAE1D8 100%)}
-.card{border-radius:18px;box-shadow:0 8px 28px rgba(48,35,30,.055);border:1px solid rgba(80,30,39,.08)}
-.ct-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:28px 30px;border-radius:24px;background:linear-gradient(135deg,#501E27,#3F1720);color:#fff;margin-bottom:18px;box-shadow:0 14px 38px rgba(80,30,39,.18)}
-.ct-hero small,.ct-card-eyebrow,.ct-section-title span{letter-spacing:.14em;font-size:11px;font-weight:800}.ct-hero h2{font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1;margin:8px 0}.ct-hero p{opacity:.82;margin:0;max-width:650px}.ct-hero .btn.primary{background:#EAE1D8;color:#501E27;border-color:#EAE1D8}.ct-hero.owner{background:linear-gradient(135deg,#2c2926,#514b47)}
-.ct-client-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin:16px 0}.ct-package-card,.ct-next-card{min-height:210px;padding:24px}.ct-card-eyebrow{color:#501E27;margin-bottom:10px}.ct-package-card h3,.ct-next-card h3,.ct-event h3{font-family:Georgia,'Times New Roman',serif;font-size:26px;margin:4px 0 18px}.ct-big-time{font-family:Georgia,'Times New Roman',serif;font-size:42px;color:#501E27}.ct-meta{font-size:12px;color:#6B6B6B;margin-top:14px}.ct-soft{background:rgba(255,255,255,.6)}
-.ct-package-balance{display:flex;align-items:baseline;gap:10px}.ct-package-balance b{font-size:34px;color:#501E27}.ct-package-balance span{color:#6B6B6B}.ct-split-balance{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ct-split-balance>div{background:#EFE7DF;border-radius:14px;padding:14px}.ct-split-balance span{display:block;color:#6B6B6B;font-size:12px}.ct-split-balance b{font-size:30px;color:#501E27}.ct-split-balance small{grid-column:1/-1;color:#6B6B6B}
-.ct-stats{margin:16px 0}.ct-activity{display:flex;justify-content:space-between;align-items:center;gap:24px}.ct-mini-bars{min-width:260px}.ct-mini-bars span{display:block;position:relative;padding:8px 0 8px 0;font-size:12px}.ct-mini-bars span:after{content:'';display:block;width:calc(var(--v)*100%);height:6px;border-radius:999px;background:#501E27;margin-top:5px;min-width:2px}.ct-event{border-left:4px solid #501E27}.ct-empty{padding:18px 0}
-.ct-status-card{margin-bottom:14px}.ct-product-card{transition:transform .15s ease,box-shadow .15s ease}.ct-product-card:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(48,35,30,.09)}.ct-section-title{display:flex;align-items:center;gap:14px;margin:24px 0 12px;color:#501E27}.ct-section-title:after{content:'';height:1px;background:var(--ct-line);flex:1}
-.ct-filter-tabs{display:flex;gap:8px;overflow:auto;margin-bottom:12px;padding-bottom:4px}.ct-booking-row{padding:14px 0}.ct-client-row{display:grid;grid-template-columns:1.4fr 1fr auto;gap:14px;align-items:center;padding:15px 0;border-bottom:1px solid rgba(0,0,0,.06)}.ct-client-row small{display:block;color:#6B6B6B;margin-top:4px}.ct-health{border-top:4px solid #501E27}.ct-health-ok{border-top:4px solid #78866b}.ct-first{margin-left:7px;background:#f6e7c8;color:#6c5421}
-.ct-account-head{display:flex;align-items:center;gap:16px;margin-bottom:18px}.ct-account-head h2{font-family:Georgia,'Times New Roman',serif;font-size:30px;margin:0}.ct-account-head p{margin:4px 0;color:#6B6B6B}.ct-avatar{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:#501E27;color:#fff;font-family:Georgia,'Times New Roman',serif;font-size:28px}
+:root{--ct-burgundy:#722F37;--ct-grey:#6B6B6B;--ct-cream:#f6f1e8;--ct-ink:#252321;--ct-line:rgba(114,47,55,.13)}
+body{background:linear-gradient(180deg,#fbf8f3 0%,#f4efe7 100%)}
+.card{border-radius:18px;box-shadow:0 8px 28px rgba(48,35,30,.055);border:1px solid rgba(114,47,55,.08)}
+.ct-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:28px 30px;border-radius:24px;background:linear-gradient(135deg,#722F37,#5e2930);color:#fff;margin-bottom:18px;box-shadow:0 14px 38px rgba(114,47,55,.18)}
+.ct-hero small,.ct-card-eyebrow,.ct-section-title span{letter-spacing:.14em;font-size:11px;font-weight:800}.ct-hero h2{font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1;margin:8px 0}.ct-hero p{opacity:.82;margin:0;max-width:650px}.ct-hero .btn.primary{background:#f6f1e8;color:#722F37;border-color:#f6f1e8}.ct-hero.owner{background:linear-gradient(135deg,#2c2926,#514b47)}
+.ct-client-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin:16px 0}.ct-package-card,.ct-next-card{min-height:210px;padding:24px}.ct-card-eyebrow{color:#722F37;margin-bottom:10px}.ct-package-card h3,.ct-next-card h3,.ct-event h3{font-family:Georgia,'Times New Roman',serif;font-size:26px;margin:4px 0 18px}.ct-big-time{font-family:Georgia,'Times New Roman',serif;font-size:42px;color:#722F37}.ct-meta{font-size:12px;color:#6B6B6B;margin-top:14px}.ct-soft{background:rgba(255,255,255,.6)}
+.ct-package-balance{display:flex;align-items:baseline;gap:10px}.ct-package-balance b{font-size:34px;color:#722F37}.ct-package-balance span{color:#6B6B6B}.ct-split-balance{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ct-split-balance>div{background:#f7f2eb;border-radius:14px;padding:14px}.ct-split-balance span{display:block;color:#6B6B6B;font-size:12px}.ct-split-balance b{font-size:30px;color:#722F37}.ct-split-balance small{grid-column:1/-1;color:#6B6B6B}
+.ct-stats{margin:16px 0}.ct-activity{display:flex;justify-content:space-between;align-items:center;gap:24px}.ct-mini-bars{min-width:260px}.ct-mini-bars span{display:block;position:relative;padding:8px 0 8px 0;font-size:12px}.ct-mini-bars span:after{content:'';display:block;width:calc(var(--v)*100%);height:6px;border-radius:999px;background:#722F37;margin-top:5px;min-width:2px}.ct-event{border-left:4px solid #722F37}.ct-empty{padding:18px 0}
+.ct-status-card{margin-bottom:14px}.ct-product-card{transition:transform .15s ease,box-shadow .15s ease}.ct-product-card:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(48,35,30,.09)}.ct-section-title{display:flex;align-items:center;gap:14px;margin:24px 0 12px;color:#722F37}.ct-section-title:after{content:'';height:1px;background:var(--ct-line);flex:1}
+.ct-filter-tabs{display:flex;gap:8px;overflow:auto;margin-bottom:12px;padding-bottom:4px}.ct-booking-row{padding:14px 0}.ct-client-row{display:grid;grid-template-columns:1.4fr 1fr auto;gap:14px;align-items:center;padding:15px 0;border-bottom:1px solid rgba(0,0,0,.06)}.ct-client-row small{display:block;color:#6B6B6B;margin-top:4px}.ct-health{border-top:4px solid #722F37}.ct-health-ok{border-top:4px solid #78866b}.ct-first{margin-left:7px;background:#f6e7c8;color:#6c5421}
+.ct-account-head{display:flex;align-items:center;gap:16px;margin-bottom:18px}.ct-account-head h2{font-family:Georgia,'Times New Roman',serif;font-size:30px;margin:0}.ct-account-head p{margin:4px 0;color:#6B6B6B}.ct-avatar{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:#722F37;color:#fff;font-family:Georgia,'Times New Roman',serif;font-size:28px}
 @media(max-width:760px){.ct-hero{padding:22px;align-items:flex-start;flex-direction:column}.ct-hero h2{font-size:31px}.ct-client-grid{grid-template-columns:1fr}.ct-client-row{grid-template-columns:1fr}.ct-activity{align-items:flex-start;flex-direction:column}.ct-mini-bars{width:100%;min-width:0}.ct-package-card,.ct-next-card{min-height:auto}.ct-hero .btn{width:100%}}
 
 /* CORE THEORY V11.1 — FINAL CONTRAST RULES */
 .btn.primary,
 button.btn.primary{
-  background:#501E27 !important;
+  background:#722F37 !important;
   color:#FFFFFF !important;
   -webkit-text-fill-color:#FFFFFF !important;
-  border-color:#501E27 !important;
+  border-color:#722F37 !important;
 }
 .btn.primary:hover,
 button.btn.primary:hover{
-  background:#3F1720 !important;
+  background:#5E2930 !important;
   color:#FFFFFF !important;
   -webkit-text-fill-color:#FFFFFF !important;
-  border-color:#3F1720 !important;
+  border-color:#5E2930 !important;
 }
 .ct-hero .btn.primary,
 .ct-hero button.btn.primary{
   background:#FFF8EE !important;
-  color:#3F1720 !important;
-  -webkit-text-fill-color:#3F1720 !important;
+  color:#5E2930 !important;
+  -webkit-text-fill-color:#5E2930 !important;
   border:1px solid #FFF8EE !important;
   box-shadow:0 4px 14px rgba(0,0,0,.10);
   font-weight:700;
@@ -40,8 +40,8 @@ button.btn.primary:hover{
 .ct-hero .btn.primary:hover,
 .ct-hero button.btn.primary:hover{
   background:#FFFFFF !important;
-  color:#35131A !important;
-  -webkit-text-fill-color:#35131A !important;
+  color:#4F2229 !important;
+  -webkit-text-fill-color:#4F2229 !important;
   border-color:#FFFFFF !important;
 }
 .ct-hero .btn.primary *,
@@ -54,129 +54,30 @@ button.btn.primary:hover{
 /* CORE THEORY V11.1.1 — CLIENT HOME CTA VISIBILITY */
 .ct-hero .ct-client-book-btn,
 .ct-hero button.ct-client-book-btn{
-  background:#501E27 !important;
+  background:#722F37 !important;
   color:#FFFFFF !important;
   -webkit-text-fill-color:#FFFFFF !important;
-  border-color:#501E27 !important;
+  border-color:#722F37 !important;
 }
 .ct-hero .ct-client-book-btn:hover,
 .ct-hero button.ct-client-book-btn:hover{
-  background:#3F1720 !important;
+  background:#5E2930 !important;
   color:#FFFFFF !important;
   -webkit-text-fill-color:#FFFFFF !important;
-  border-color:#3F1720 !important;
+  border-color:#5E2930 !important;
 }
 
 
-/* ==========================================================================
-   CORE THEORY V11.2 — FINAL BRAND SYSTEM
-   Final palette:
-   Burgundy #501E27
-   Beige #EAE1D8
-   Blue-grey #B3C7D6
-   Black #000000
-   ========================================================================== */
-:root{
-  --ct-burgundy:#501E27 !important;
-  --ct-burgundy-dark:#3F1720 !important;
-  --ct-beige:#EAE1D8 !important;
-  --ct-cream:#EAE1D8 !important;
-  --ct-blue-grey:#B3C7D6 !important;
-  --ct-ink:#000000 !important;
-  --ct-grey:#6B6B6B !important;
-  --ct-line:rgba(80,30,39,.14) !important;
-}
-
-html,body{
-  background:#EAE1D8 !important;
-  color:#000000;
-}
-
-/* Global primary actions */
-.btn.primary,
-button.btn.primary{
-  background:#501E27 !important;
-  border-color:#501E27 !important;
-  color:#FFFFFF !important;
-  -webkit-text-fill-color:#FFFFFF !important;
-}
-.btn.primary:hover,
-button.btn.primary:hover{
-  background:#3F1720 !important;
-  border-color:#3F1720 !important;
-}
-
-/* Final client home CTA */
-.ct-hero .ct-client-book-btn,
-.ct-hero button.ct-client-book-btn{
-  background:#501E27 !important;
-  border-color:#501E27 !important;
-  color:#FFFFFF !important;
-  -webkit-text-fill-color:#FFFFFF !important;
-}
-
-/* Hero surfaces */
-.ct-hero{
-  background:#501E27 !important;
-  color:#FFFFFF !important;
-  box-shadow:0 14px 38px rgba(80,30,39,.18) !important;
-}
-.ct-hero.owner{
-  background:#000000 !important;
-}
-.ct-hero .btn.primary:not(.ct-client-book-btn),
-.ct-hero button.btn.primary:not(.ct-client-book-btn){
-  background:#EAE1D8 !important;
-  border-color:#EAE1D8 !important;
-  color:#501E27 !important;
-  -webkit-text-fill-color:#501E27 !important;
-}
-
-/* Cards / chrome */
-.card{
-  border-color:rgba(80,30,39,.10) !important;
-}
-.sidebar{
-  border-color:rgba(80,30,39,.12) !important;
-}
-.nav button.active,
-.nav button:hover{
-  color:#501E27 !important;
-}
-.badge,
-.role-chip{
-  border-color:rgba(80,30,39,.14);
-}
-
-/* Editorial accents */
-.ct-card-eyebrow,
-.ct-section-title,
-.ct-big-time,
-.ct-package-balance b,
-.ct-split-balance b{
-  color:#501E27 !important;
-}
-.ct-event{
-  border-left-color:#501E27 !important;
-}
-.ct-mini-bars span:after{
-  background:#501E27 !important;
-}
-.ct-avatar{
-  background:#501E27 !important;
-}
-
-/* Exact finalized logo inside the application */
+/* CORE THEORY V11.1.5 — LOGO ONLY */
 .ct-logo-brand{
   display:flex !important;
   flex-direction:column;
   align-items:flex-start;
-  gap:8px;
-  color:#501E27 !important;
+  gap:7px;
 }
 .ct-logo-brand img{
   display:block;
-  width:156px;
+  width:150px;
   max-width:100%;
   height:auto;
   object-fit:contain;
@@ -189,27 +90,7 @@ button.btn.primary:hover{
 .auth-brand.ct-logo-brand img{
   width:min(260px,72vw);
 }
-.ct-logo-brand small{
-  color:#000000 !important;
-  letter-spacing:.14em;
-  font-weight:600;
-}
-
-/* Keep Blue-grey as the secondary brand accent */
-.sync-note,
-.muted,
-.ct-meta,
-.ct-package-balance span,
-.ct-split-balance span,
-.ct-split-balance small{
-  color:#6B6B6B;
-}
-.ct-soft{
-  background:rgba(179,199,214,.16) !important;
-}
-
-/* Mobile logo sizing */
 @media(max-width:760px){
-  .ct-logo-brand img{width:132px;}
-  .auth-brand.ct-logo-brand img{width:min(230px,74vw);}
+  .ct-logo-brand img{width:130px;}
+  .auth-brand.ct-logo-brand img{width:min(225px,74vw);}
 }

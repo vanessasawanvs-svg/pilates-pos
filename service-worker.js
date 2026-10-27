@@ -1,5 +1,4 @@
-const CACHE='core-theory-v11-2-final-brand';
-const PRECACHE=['/','/index.html','/styles.css','/styles-v11.css','/app-v11.2.js','/manifest.json','/offline.html','/core-theory-logo.png','/icons/icon-192.png','/icons/icon-512.png','/icons/icon-maskable-512.png','/icons/apple-touch-icon.png'];
+const CACHE='core-theory-v11-1-6-app-icon';
 const STATIC_ASSETS=['./styles.css','./styles-v11.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{
