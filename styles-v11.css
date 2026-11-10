@@ -360,3 +360,13 @@ button.btn.primary:hover{
     right:12px;left:12px;top:72px;width:auto;
   }
 }
+
+
+/* CORE THEORY V11.1.27 — CLICKABLE NOTIFICATION DESTINATION */
+.ct-notif-item{cursor:pointer}
+.ct-notif-highlight{
+  outline:3px solid rgba(114,47,55,.38) !important;
+  box-shadow:0 0 0 6px rgba(114,47,55,.10),0 10px 30px rgba(0,0,0,.10) !important;
+  border-radius:12px;
+  transition:box-shadow .2s ease,outline .2s ease;
+}
