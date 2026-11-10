@@ -1,4 +1,4 @@
-const CACHE='core-theory-v11-1-16-capacity5';
+const CACHE='core-theory-v11-1-17-text-color-refresh';
 const STATIC_ASSETS=['./styles.css','./styles-v11.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{
