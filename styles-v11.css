@@ -231,3 +231,25 @@ button.btn.primary:hover{
   color:inherit !important;
   -webkit-text-fill-color:inherit !important;
 }
+
+
+/* CORE THEORY V11.1.20 — TRUE CLASS LEVEL TEXT COLOR FIX */
+/* Schedule, Owner Today's Classes, Instructor Today, and other shared classCard views */
+.class-card{
+  color:var(--level-text,#25241f) !important;
+  -webkit-text-fill-color:var(--level-text,#25241f) !important;
+}
+.class-card b,
+.class-card span,
+.class-card small,
+.class-card strong,
+.class-card .muted,
+.class-card .ct-sub-inline{
+  color:inherit !important;
+  -webkit-text-fill-color:inherit !important;
+}
+
+/* Level badges throughout client/staff views */
+.badge[style*="background"]{
+  -webkit-text-fill-color:currentColor;
+}
