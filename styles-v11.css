@@ -269,7 +269,7 @@ button.btn.primary:hover{
 }
 
 
-/* CORE THEORY V11.1.23 — OWNER LIVE NOTIFICATION BELL */
+/* CORE THEORY V11.1.26 — SAFE OWNER LIVE NOTIFICATION BELL */
 .ct-owner-notif-host{
   position:relative;
   margin-left:10px;
@@ -286,8 +286,8 @@ button.btn.primary:hover{
   place-items:center;
   cursor:pointer;
   box-shadow:0 5px 16px rgba(0,0,0,.06);
+  font-size:18px;
 }
-.ct-notif-bell-icon{font-size:19px;line-height:1}
 .ct-notif-count{
   position:absolute;
   right:-5px;
@@ -299,8 +299,8 @@ button.btn.primary:hover{
   display:grid;
   place-items:center;
   background:#501E27;
-  color:#fff;
-  -webkit-text-fill-color:#fff;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
   font-size:10px;
   font-weight:800;
   border:2px solid #fff;
@@ -326,16 +326,10 @@ button.btn.primary:hover{
   padding:15px 16px;
   border-bottom:1px solid rgba(0,0,0,.07);
 }
-.ct-notif-head>div:first-child{
-  display:flex;
-  flex-direction:column;
-  gap:2px;
-}
+.ct-notif-head>div:first-child{display:flex;flex-direction:column;gap:2px}
 .ct-notif-head small{color:#6B6B6B}
-.ct-notif-list{
-  max-height:55vh;
-  overflow:auto;
-}
+.ct-notif-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.ct-notif-list{max-height:55vh;overflow:auto}
 .ct-notif-item{
   width:100%;
   display:grid;
@@ -350,33 +344,19 @@ button.btn.primary:hover{
 }
 .ct-notif-item.unread{background:#f8f2ee}
 .ct-notif-dot{
-  width:7px;
-  height:7px;
-  border-radius:50%;
-  background:transparent;
-  margin-top:6px;
+  width:7px;height:7px;border-radius:50%;
+  background:transparent;margin-top:6px;
 }
 .ct-notif-item.unread .ct-notif-dot{background:#501E27}
 .ct-notif-item span:last-child{display:flex;flex-direction:column;gap:3px}
 .ct-notif-item small{color:#444}
-.ct-notif-item em{
-  font-style:normal;
-  font-size:10px;
-  color:#777;
-  margin-top:2px;
-}
-.ct-notif-empty{
-  padding:28px 18px;
-  text-align:center;
-  color:#777;
-}
+.ct-notif-item em{font-style:normal;font-size:10px;color:#777;margin-top:2px}
+.ct-notif-empty{padding:28px 18px;text-align:center;color:#777}
+
 @media(max-width:760px){
   .ct-owner-notif-host{margin-left:4px}
   .ct-notif-panel{
     position:fixed;
-    right:12px;
-    left:12px;
-    top:72px;
-    width:auto;
+    right:12px;left:12px;top:72px;width:auto;
   }
 }
