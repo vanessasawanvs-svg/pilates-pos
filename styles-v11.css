@@ -213,3 +213,21 @@ button.btn.primary:hover{
   .ct-level-color-row{grid-template-columns:1fr 1fr;}
   .ct-level-color-row > span:first-child{grid-column:1/-1;}
 }
+
+
+/* CORE THEORY V11.1.19 — CLASS LEVEL TEXT COLOR EVERYWHERE */
+/* Elements inside class cards should inherit the level text color chosen by Owner. */
+.class-card[style*="background"] *,
+.schedule-card[style*="background"] *,
+.booking-card[style*="background"] *,
+.ct-class-card[style*="background"] *,
+.today-class[style*="background"] *,
+[class*="class"][style*="background"] b,
+[class*="class"][style*="background"] small,
+[class*="class"][style*="background"] span,
+[class*="schedule"][style*="background"] b,
+[class*="schedule"][style*="background"] small,
+[class*="schedule"][style*="background"] span{
+  color:inherit !important;
+  -webkit-text-fill-color:inherit !important;
+}
