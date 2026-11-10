@@ -253,3 +253,17 @@ button.btn.primary:hover{
 .badge[style*="background"]{
   -webkit-text-fill-color:currentColor;
 }
+
+
+/* CORE THEORY V11.1.21 — CLIENT LEVEL BADGE TEXT COLOR */
+.ct-client-level-badge{
+  color:inherit;
+}
+.client-class .ct-client-level-badge,
+.ct-client-week-class .ct-client-level-badge{
+  color:inherit;
+}
+.client-class .ct-client-level-badge[style],
+.ct-client-week-class .ct-client-level-badge[style]{
+  -webkit-text-fill-color:inherit;
+}
