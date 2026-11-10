@@ -1,4 +1,4 @@
-const CACHE='core-theory-v11-1-11-client-cta';
+const CACHE='core-theory-v11-1-16-capacity5';
 const STATIC_ASSETS=['./styles.css','./styles-v11.css','./manifest.json','./offline.html'];
 
 self.addEventListener('install',event=>{
