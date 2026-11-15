@@ -370,3 +370,35 @@ button.btn.primary:hover{
   border-radius:12px;
   transition:box-shadow .2s ease,outline .2s ease;
 }
+
+
+/* CORE THEORY V11.1.28 — DETAILED CLIENT LEDGER */
+.ct-client-row-v1128{
+  grid-template-columns:minmax(180px,1.25fr) minmax(180px,1fr) minmax(170px,1fr) auto;
+}
+.ct-client-name-button,.ct-history-class,.ct-inline-client-link{
+  appearance:none;border:0;background:transparent;padding:0;margin:0;text-align:left;
+  font:inherit;color:inherit;cursor:pointer;
+}
+.ct-client-name-button b,.ct-inline-client-link{
+  text-decoration:underline;text-underline-offset:3px;
+}
+.ct-client-name-button small,.ct-history-class small{display:block;margin-top:4px}
+.ct-danger-text{color:#8b2d2d !important;font-weight:700}
+.ct-profile-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:12px}
+.ct-profile-head h2{margin:0 0 4px}
+.ct-profile-head p{margin:0;color:#6B6B6B}
+.ct-profile-tabs{overflow:auto;white-space:nowrap}
+.ct-profile-body{margin-top:14px;max-height:65vh;overflow:auto;padding-right:2px}
+.ct-profile-actions{margin-top:14px}
+.ct-owed-card{margin-bottom:14px}
+.ct-owed-card p{margin:6px 0}
+.ct-client-owed-banner{margin:0 0 14px}
+.ct-timeline-row{display:grid;grid-template-columns:14px 1fr;gap:10px;padding:12px 0;border-bottom:1px solid rgba(0,0,0,.06)}
+.ct-timeline-dot{width:9px;height:9px;border-radius:50%;background:#722F37;margin-top:5px}
+.ct-timeline-row small{display:block;color:#6B6B6B;margin-top:3px}
+.ct-timeline-row p{margin:5px 0}
+@media(max-width:900px){
+  .ct-client-row-v1128{grid-template-columns:1fr}
+  .ct-profile-head{flex-direction:column}
+}
